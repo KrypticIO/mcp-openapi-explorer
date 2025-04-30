@@ -152,6 +152,13 @@ Delete a loaded OpenAPI specification.
 **Parameters:**
 - `spec_id` (string, required): ID of the API spec to delete (use list_api_specs to see available specs)
 
+### `refresh_api_spec`
+
+Refresh one or more OpenAPI specifications by re-downloading them from their source.
+
+**Parameters:**
+- `spec_id` (string, optional): ID of the API spec to refresh. If not provided, all loaded specs will be refreshed.
+
 #### Get information about API endpoints
 
 ```bash
@@ -162,6 +169,18 @@ echo '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"get_api_in
 
 ```bash
 echo '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"delete_api_spec","arguments":{"spec_id":"Swagger Petstore - OpenAPI 3.0"}}}' | ./mcp-openapi-explorer serve
+```
+
+#### Refresh all loaded API specifications
+
+```bash
+echo '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"refresh_api_spec","arguments":{}}}' | ./mcp-openapi-explorer serve
+```
+
+#### Refresh a specific API specification
+
+```bash
+echo '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"refresh_api_spec","arguments":{"spec_id":"Swagger Petstore - OpenAPI 3.0"}}}' | ./mcp-openapi-explorer serve
 ```
 
 ## How It Works

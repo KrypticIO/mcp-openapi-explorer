@@ -249,6 +249,107 @@ func startServer() {
 		return mcp.NewToolResultText(fmt.Sprintf("Successfully deleted API spec: %s", specID)), nil
 	})
 
+	// Add a tool to refresh API specs
+	refreshSpecTool := mcp.NewTool(
+		"refresh_api_spec",
+		mcp.WithDescription("Refresh one or more OpenAPI specifications by re-downloading them from their source"),
+		mcp.WithString("spec_id",
+			mcp.Description("ID of the API spec to refresh (leave empty to refresh all specs)"),
+		),
+	)
+
+	// Register the refresh_api_spec tool
+	mcpServer.AddTool(refreshSpecTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Check if spec_id is provided
+		specID, hasSpecID := req.Params.Arguments["spec_id"].(string)
+
+		// If no spec_id is provided, refresh all specs
+		if !hasSpecID || specID == "" {
+			Logger.Infow("Refreshing all API specs")
+
+			// If no specs are loaded, return an error
+			if len(handler.specs) == 0 {
+				return mcp.NewToolResultText("No API specs are currently loaded."), nil
+			}
+
+			// Keep track of refreshed and failed specs
+			refreshed := 0
+			failed := 0
+			var failedSpecs []string
+
+			// Copy the map to avoid concurrent modification during iteration
+			specsToRefresh := make(map[string]*APISpec)
+			for id, spec := range handler.specs {
+				specsToRefresh[id] = spec
+			}
+
+			// Refresh each spec
+			for id, spec := range specsToRefresh {
+				Logger.Infow("Refreshing spec", "specID", id, "url", spec.URL)
+
+				// Re-download the spec
+				newSpec, err := handler.loadOpenAPISpec(ctx, spec.URL)
+				if err != nil {
+					Logger.Warnw("Failed to refresh spec", "error", err, "specID", id)
+					failed++
+					failedSpecs = append(failedSpecs, id)
+					continue
+				}
+
+				// Update the spec
+				handler.specs[id] = &APISpec{
+					URL:  spec.URL,
+					Spec: newSpec,
+				}
+
+				// Save the spec to a file for persistence
+				if err := handler.saveSpec(id, handler.specs[id]); err != nil {
+					Logger.Warnw("Failed to save refreshed spec", "error", err, "specID", id)
+				}
+
+				refreshed++
+			}
+
+			// Prepare result message
+			result := fmt.Sprintf("Refreshed %d API spec(s)", refreshed)
+			if failed > 0 {
+				result += fmt.Sprintf(", %d failed", failed)
+				result += "\nFailed specs: " + strings.Join(failedSpecs, ", ")
+			}
+
+			return mcp.NewToolResultText(result), nil
+		}
+
+		// Handle refreshing a single spec
+		spec, exists := handler.specs[specID]
+		if !exists {
+			Logger.Warnw("Spec not found for refresh", "specID", specID)
+			return mcp.NewToolResultError(fmt.Sprintf("Spec not found: %s", specID)), nil
+		}
+
+		Logger.Infow("Refreshing spec", "specID", specID, "url", spec.URL)
+
+		// Re-download the spec
+		newSpec, err := handler.loadOpenAPISpec(ctx, spec.URL)
+		if err != nil {
+			Logger.Errorw("Failed to refresh spec", "error", err, "specID", specID)
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to refresh spec %s: %v", specID, err)), nil
+		}
+
+		// Update the spec
+		handler.specs[specID] = &APISpec{
+			URL:  spec.URL,
+			Spec: newSpec,
+		}
+
+		// Save the spec to a file for persistence
+		if err := handler.saveSpec(specID, handler.specs[specID]); err != nil {
+			Logger.Warnw("Failed to save refreshed spec", "error", err, "specID", specID)
+		}
+
+		return mcp.NewToolResultText(fmt.Sprintf("Successfully refreshed API spec: %s (version %s)", newSpec.Info.Title, newSpec.Info.Version)), nil
+	})
+
 	// Add a resource that provides system information
 	systemResource := mcp.NewResource(
 		"openapi://system",
