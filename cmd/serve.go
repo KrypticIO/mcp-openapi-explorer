@@ -179,6 +179,33 @@ func startServer() {
 			Logger.Warnw("Failed to save spec", "error", err, "specID", specID)
 		}
 
+		// Update configuration with the new spec if a config file is being used
+		if ConfigFile != "" {
+			// Store the original URL (before any GitHub URL conversion)
+			origURL := url
+
+			// Check if this URL is already in the config
+			found := false
+			for _, configURL := range Config.Specs {
+				if configURL == origURL {
+					found = true
+					break
+				}
+			}
+
+			// Only add to config if not already there
+			if !found {
+				Config.Specs = append(Config.Specs, origURL)
+
+				// Save the updated configuration
+				if err := WriteConfigFile(ConfigFile); err != nil {
+					Logger.Warnw("Failed to update config file with new spec", "error", err, "file", ConfigFile)
+				} else {
+					Logger.Infow("Updated config file with new spec", "url", origURL, "file", ConfigFile)
+				}
+			}
+		}
+
 		return mcp.NewToolResultText(fmt.Sprintf("Successfully loaded API spec: %s (version %s)", spec.Info.Title, spec.Info.Version)), nil
 	})
 
@@ -225,7 +252,7 @@ func startServer() {
 		}
 
 		// Check if the spec exists before trying to delete it
-		_, exists := handler.specs[specID]
+		spec, exists := handler.specs[specID]
 		if !exists {
 			Logger.Warnw("Spec not found", "specID", specID)
 			return mcp.NewToolResultError(fmt.Sprintf("Spec not found: %s", specID)), nil
@@ -243,6 +270,31 @@ func startServer() {
 		if err != nil {
 			Logger.Errorw("Failed to delete spec", "error", err, "specID", specID)
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to delete spec: %v", err)), nil
+		}
+
+		// Update configuration by removing the spec if a config file is being used
+		if ConfigFile != "" {
+			specURL := spec.URL
+
+			// Create a new specs array without the deleted spec
+			updatedSpecs := make([]string, 0, len(Config.Specs))
+			for _, configURL := range Config.Specs {
+				if configURL != specURL {
+					updatedSpecs = append(updatedSpecs, configURL)
+				}
+			}
+
+			// Only update if we actually removed something
+			if len(updatedSpecs) < len(Config.Specs) {
+				Config.Specs = updatedSpecs
+
+				// Save the updated configuration
+				if err := WriteConfigFile(ConfigFile); err != nil {
+					Logger.Warnw("Failed to update config file after removing spec", "error", err, "file", ConfigFile)
+				} else {
+					Logger.Infow("Updated config file after removing spec", "url", specURL, "file", ConfigFile)
+				}
+			}
 		}
 
 		Logger.Infow("Successfully deleted spec", "specID", specID)

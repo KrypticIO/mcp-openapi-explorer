@@ -141,6 +141,8 @@ Load an OpenAPI specification from a URL or file path.
   - Local file paths (e.g., 'file:///path/to/spec.json' or just '/path/to/spec.json')
   - Both JSON and YAML formats are supported
 
+When loading a new API spec with a specified configuration file, the spec URL will be automatically added to the configuration file's `specs` list for persistence.
+
 ### `list_api_specs`
 
 List all loaded OpenAPI specifications.
@@ -151,6 +153,8 @@ Delete a loaded OpenAPI specification.
 
 **Parameters:**
 - `spec_id` (string, required): ID of the API spec to delete (use list_api_specs to see available specs)
+
+When deleting an API spec with a specified configuration file, the spec URL will be automatically removed from the configuration file's `specs` list for persistence.
 
 ### `refresh_api_spec`
 
