@@ -36,7 +36,7 @@ func loadSpec(url string) {
 		path := strings.TrimPrefix(url, "@")
 
 		// Convert github.com URL to raw.githubusercontent.com
-		ghPath, err := convertGitHubURLToRaw(path, githubToken)
+		ghPath, err := convertGitHubURLToRaw(path, Config.GitHub.Token)
 		if err != nil {
 			Logger.Fatalw("Failed to process GitHub URL", "error", err, "url", url)
 		}

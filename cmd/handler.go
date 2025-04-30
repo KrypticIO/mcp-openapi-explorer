@@ -98,8 +98,8 @@ func (h *MCPHandler) loadOpenAPISpec(ctx context.Context, specURL string) (*open
 		}
 
 		// Add authentication header if this is a GitHub URL and a token is provided
-		if strings.Contains(specURL, "githubusercontent.com") && githubToken != "" {
-			req.Header.Add("Authorization", fmt.Sprintf("token %s", githubToken))
+		if strings.Contains(specURL, "githubusercontent.com") && Config.GitHub.Token != "" {
+			req.Header.Add("Authorization", fmt.Sprintf("token %s", Config.GitHub.Token))
 		}
 
 		resp, err := client.Do(req)

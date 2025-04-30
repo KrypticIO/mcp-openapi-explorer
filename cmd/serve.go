@@ -11,11 +11,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	// Flags
-	specsDir string
-)
-
 // serveCmd represents the serve command
 var serveCmd = &cobra.Command{
 	Use:   "serve",
@@ -31,7 +26,6 @@ var serveCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(serveCmd)
-	serveCmd.Flags().StringVarP(&specsDir, "specs-dir", "d", "./specs", "Directory to store downloaded API specs")
 }
 
 func startServer() {
@@ -43,47 +37,56 @@ func startServer() {
 	// Create MCP handler with access to OpenAPI specs
 	handler := NewMCPHandler()
 
-	// If a spec path is provided via command line, load it immediately
-	if specPath != "" {
-		Logger.Infow("Loading initial OpenAPI spec from provided path", "path", specPath)
+	// Load specs from configuration if available
+	if len(Config.Specs) > 0 {
+		Logger.Infow("Loading specs from configuration", "count", len(Config.Specs))
 
-		// Handle GitHub repositories
-		if strings.HasPrefix(specPath, "github.com") || strings.HasPrefix(specPath, "@github.com") {
-			// Trim any '@' prefix that might be used
-			path := strings.TrimPrefix(specPath, "@")
-
-			// Convert github.com URL to raw.githubusercontent.com
-			ghPath, err := convertGitHubURLToRaw(path, githubToken)
-			if err != nil {
-				Logger.Fatalw("Failed to process GitHub URL", "error", err, "path", path)
-			}
-			specPath = ghPath
-			Logger.Debugw("Converted GitHub URL", "path", specPath)
-		}
-
-		// Load the OpenAPI spec
 		ctx := context.Background()
-		spec, err := handler.loadOpenAPISpec(ctx, specPath)
-		if err != nil {
-			Logger.Fatalw("Failed to load initial OpenAPI spec", "error", err, "path", specPath)
-		}
+		for _, specURL := range Config.Specs {
+			Logger.Infow("Loading spec from configuration", "url", specURL)
 
-		// Generate a unique ID for this spec and store it
-		specID := spec.Info.Title
-		handler.specs[specID] = &APISpec{
-			URL:  specPath,
-			Spec: spec,
-		}
+			// Handle GitHub repositories
+			if strings.HasPrefix(specURL, "github.com") || strings.HasPrefix(specURL, "@github.com") {
+				// Trim any '@' prefix that might be used
+				path := strings.TrimPrefix(specURL, "@")
 
-		// Save the spec to a file for persistence
-		if err := handler.saveSpec(specID, handler.specs[specID]); err != nil {
-			Logger.Warnw("Failed to save initial spec", "error", err, "specID", specID)
-		}
+				// Use GitHub token from config
+				ghToken := Config.GitHub.Token
 
-		Logger.Infow("Successfully loaded initial API spec",
-			"title", spec.Info.Title,
-			"version", spec.Info.Version,
-			"endpoints", len(spec.Paths.Map()))
+				// Convert github.com URL to raw.githubusercontent.com
+				ghPath, err := convertGitHubURLToRaw(path, ghToken)
+				if err != nil {
+					Logger.Warnw("Failed to process GitHub URL", "error", err, "path", path)
+					continue
+				}
+				specURL = ghPath
+				Logger.Debugw("Converted GitHub URL", "path", specURL)
+			}
+
+			// Load the OpenAPI spec
+			spec, err := handler.loadOpenAPISpec(ctx, specURL)
+			if err != nil {
+				Logger.Warnw("Failed to load spec from configuration", "error", err, "url", specURL)
+				continue
+			}
+
+			// Generate a unique ID for this spec and store it
+			specID := spec.Info.Title
+			handler.specs[specID] = &APISpec{
+				URL:  specURL,
+				Spec: spec,
+			}
+
+			// Save the spec to a file for persistence
+			if err := handler.saveSpec(specID, handler.specs[specID]); err != nil {
+				Logger.Warnw("Failed to save spec from configuration", "error", err, "specID", specID)
+			}
+
+			Logger.Infow("Successfully loaded API spec from configuration",
+				"title", spec.Info.Title,
+				"version", spec.Info.Version,
+				"endpoints", len(spec.Paths.Map()))
+		}
 	}
 
 	// Create MCP server
@@ -146,8 +149,11 @@ func startServer() {
 			// Trim any '@' prefix that might be used
 			path := strings.TrimPrefix(url, "@")
 
+			// Use GitHub token from config
+			ghToken := Config.GitHub.Token
+
 			// Convert github.com URL to raw.githubusercontent.com
-			ghPath, err := convertGitHubURLToRaw(path, githubToken)
+			ghPath, err := convertGitHubURLToRaw(path, ghToken)
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Failed to process GitHub URL: %v", err)), nil
 			}

@@ -16,10 +16,10 @@ var (
 
 	// Flags
 	verboseFlag bool
-	portFlag    string
-	specPath    string
-	githubToken string
-	useContext7 bool
+	configFlag  string // Config file flag
+
+	// Global variables
+	specsDir string // Directory to store downloaded API specs
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -62,11 +62,24 @@ func Execute() {
 }
 
 func init() {
+	// Set up the config file path
+	cobra.OnInitialize(func() {
+		// Store the config flag value in the global ConfigFile variable
+		ConfigFile = configFlag
+
+		// Initialize config using Viper
+		if err := initConfig(); err != nil {
+			fmt.Printf("Error loading configuration: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Set the global specsDir variable from config
+		specsDir = Config.Server.SpecsDir
+	})
+
 	// Define persistent flags for all commands
 	rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "Enable verbose output")
-	rootCmd.PersistentFlags().StringVarP(&portFlag, "port", "p", "8080", "Port for the server to listen on")
-	rootCmd.PersistentFlags().StringVarP(&specPath, "spec", "s", "", "Path or URL to OpenAPI specification (YAML or JSON)")
-	rootCmd.PersistentFlags().StringVarP(&githubToken, "github-token", "g", "", "GitHub token for accessing private repositories")
+	rootCmd.PersistentFlags().StringVarP(&configFlag, "config", "c", "", "Path to configuration file")
 }
 
 // convertGitHubURLToRaw converts a GitHub URL to a raw.githubusercontent.com URL
