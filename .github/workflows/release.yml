@@ -4,11 +4,19 @@ on:
   push:
     tags:
       - 'v*' # Run workflow on version tags, e.g., v1.0.0
+  # Also run on release creation to ensure binaries are attached
+  release:
+    types: [created]
+
+# Add explicit permissions for the workflow
+permissions:
+  contents: write # Required for creating releases and uploading assets
+  packages: read
 
 jobs:
   build:
-    name: Build and Release
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    name: Build Binaries
+    runs-on: ubuntu-latest
     
     strategy:
       matrix:
@@ -40,7 +48,15 @@ jobs:
 
       - name: Get version from tag
         id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+        run: |
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+          elif [[ $GITHUB_EVENT_NAME == 'release' ]]; then
+            echo "VERSION=${{ github.event.release.tag_name }}" >> $GITHUB_ENV
+          else
+            echo "VERSION=unknown" >> $GITHUB_ENV
+          fi
+          echo "Using version: $VERSION"
 
       - name: Build binary
         env:
@@ -60,7 +76,7 @@ jobs:
           
           echo "BINARY_NAME=${BINARY_NAME}" >> $GITHUB_ENV
 
-      - name: Upload artifacts
+      - name: Upload artifact to workflow
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.BINARY_NAME }}
@@ -68,10 +84,36 @@ jobs:
             ${{ env.BINARY_NAME }}
             ${{ env.BINARY_NAME }}.sha256
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 5
+      
+      # Directly attach binary to release
+      - name: Upload binary to release
+        if: github.event_name == 'release'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ./${{ env.BINARY_NAME }}
+          asset_name: ${{ env.BINARY_NAME }}
+          asset_content_type: application/octet-stream
+      
+      # Also upload the checksum
+      - name: Upload checksum to release
+        if: github.event_name == 'release'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ./${{ env.BINARY_NAME }}.sha256
+          asset_name: ${{ env.BINARY_NAME }}.sha256
+          asset_content_type: text/plain
 
+  # This job creates a release when triggered by a tag push
   create-release:
     name: Create Release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     needs: build
     runs-on: blacksmith-4vcpu-ubuntu-2204
     
@@ -88,10 +130,12 @@ jobs:
         with:
           path: ./artifacts
 
-      - name: List downloaded artifacts
-        run: find ./artifacts -type f | sort
-
-      - name: Create Release
+      - name: Display artifact structure
+        run: |
+          ls -la ./artifacts
+          find ./artifacts -type f | sort
+      
+      - name: Create release
         id: create_release
         uses: softprops/action-gh-release@v2
         with:
@@ -99,7 +143,8 @@ jobs:
           draft: false
           prerelease: ${{ contains(env.VERSION, 'beta') || contains(env.VERSION, 'alpha') || contains(env.VERSION, 'rc') }}
           generate_release_notes: true
-          files: ./artifacts/**/*
-          fail_on_unmatched_files: true
+          files: |
+            ./artifacts/**/*
+          fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
