@@ -106,7 +106,12 @@ func (h *MCPHandler) loadOpenAPISpec(ctx context.Context, specURL string) (*open
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch spec: %w", err)
 		}
-		defer resp.Body.Close()
+		defer func(Body io.ReadCloser) {
+			err := Body.Close()
+			if err != nil {
+				Logger.Errorw("Failed to close response body", "error", err)
+			}
+		}(resp.Body)
 
 		if resp.StatusCode != http.StatusOK {
 			return nil, fmt.Errorf("failed to fetch spec: HTTP %d", resp.StatusCode)
@@ -141,7 +146,7 @@ func (h *MCPHandler) loadOpenAPISpec(ctx context.Context, specURL string) (*open
 		}
 
 		// Now load from the JSON data
-		spec, err = loader.LoadFromData(jsonBytes)
+		spec, _ = loader.LoadFromData(jsonBytes)
 	}
 
 	if err != nil {
@@ -171,66 +176,6 @@ func isWhitespace(b byte) bool {
 	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
 }
 
-// generateEndpointContext generates context information for an API endpoint
-func (h *MCPHandler) generateEndpointContext(path string, method string, operation *openapi3.Operation) string {
-	var context strings.Builder
-
-	context.WriteString(fmt.Sprintf("Endpoint: %s %s\n", method, path))
-	if operation.Summary != "" {
-		context.WriteString(fmt.Sprintf("Summary: %s\n", operation.Summary))
-	}
-	if operation.Description != "" {
-		context.WriteString(fmt.Sprintf("Description: %s\n", operation.Description))
-	}
-
-	// Parameters
-	if len(operation.Parameters) > 0 {
-		context.WriteString("\nParameters:\n")
-		for _, param := range operation.Parameters {
-			context.WriteString(fmt.Sprintf("- %s (%s): %s\n", param.Value.Name, param.Value.In, param.Value.Description))
-			if param.Value.Required {
-				context.WriteString("  Required: true\n")
-			}
-		}
-	}
-
-	// Request Body
-	if operation.RequestBody != nil {
-		context.WriteString("\nRequest Body:\n")
-		if operation.RequestBody.Value.Description != "" {
-			context.WriteString(fmt.Sprintf("Description: %s\n", operation.RequestBody.Value.Description))
-		}
-		for contentType, mediaType := range operation.RequestBody.Value.Content {
-			context.WriteString(fmt.Sprintf("Content-Type: %s\n", contentType))
-			if mediaType.Schema != nil {
-				context.WriteString("Schema: ")
-				if mediaType.Schema.Ref != "" {
-					context.WriteString(fmt.Sprintf("Reference to %s\n", mediaType.Schema.Ref))
-				} else if mediaType.Schema.Value != nil {
-					context.WriteString(fmt.Sprintf("Type: %s\n", mediaType.Schema.Value.Type))
-				}
-			}
-		}
-	}
-
-	// Responses
-	if operation.Responses != nil {
-		context.WriteString("\nResponses:\n")
-		for status, response := range operation.Responses.Map() {
-			if response != nil && response.Value != nil {
-				desc := "No description provided"
-				if response.Value.Description != nil && *response.Value.Description != "" {
-					desc = *response.Value.Description
-				}
-				context.WriteString(fmt.Sprintf("- %s: %s\n", status, desc))
-			}
-		}
-		context.WriteString("\n")
-	}
-
-	return context.String()
-}
-
 // handleMCPRequest handles MCP requests
 func (h *MCPHandler) handleMCPRequest(ctx context.Context, req *MCPRequest) (*MCPResponse, error) {
 	Logger.Debugw("Received MCP request", "query", req.Query)
@@ -242,23 +187,23 @@ func (h *MCPHandler) handleMCPRequest(ctx context.Context, req *MCPRequest) (*MC
 		}, nil
 	}
 
-	// Generate comprehensive context about all loaded API specs
-	var context strings.Builder
+	// Generate comprehensive apiContext about all loaded API specs
+	var apiContext strings.Builder
 
 	// Provide an overview of available specs
-	context.WriteString("# Available API Specifications\n\n")
+	apiContext.WriteString("# Available API Specifications\n\n")
 	for _, spec := range h.specs {
-		context.WriteString(fmt.Sprintf("## %s (Version: %s)\n", spec.Spec.Info.Title, spec.Spec.Info.Version))
+		apiContext.WriteString(fmt.Sprintf("## %s (Version: %s)\n", spec.Spec.Info.Title, spec.Spec.Info.Version))
 		if spec.Spec.Info.Description != "" {
-			context.WriteString(fmt.Sprintf("%s\n\n", spec.Spec.Info.Description))
+			apiContext.WriteString(fmt.Sprintf("%s\n\n", spec.Spec.Info.Description))
 		}
-		context.WriteString(fmt.Sprintf("Source: %s\n\n", spec.URL))
+		apiContext.WriteString(fmt.Sprintf("Source: %s\n\n", spec.URL))
 	}
 
 	// Provide details about endpoints for each spec
-	context.WriteString("# API Endpoints\n\n")
+	apiContext.WriteString("# API Endpoints\n\n")
 	for _, spec := range h.specs {
-		context.WriteString(fmt.Sprintf("## %s Endpoints\n\n", spec.Spec.Info.Title))
+		apiContext.WriteString(fmt.Sprintf("## %s Endpoints\n\n", spec.Spec.Info.Title))
 
 		// Sort paths for consistent output
 		paths := make([]string, 0, len(spec.Spec.Paths.Map()))
@@ -274,76 +219,76 @@ func (h *MCPHandler) handleMCPRequest(ctx context.Context, req *MCPRequest) (*MC
 				continue
 			}
 
-			context.WriteString(fmt.Sprintf("### Path: %s\n\n", path))
+			apiContext.WriteString(fmt.Sprintf("### Path: %s\n\n", path))
 
 			for method, operation := range pathItem.Operations() {
-				context.WriteString(fmt.Sprintf("#### %s\n\n", strings.ToUpper(method)))
+				apiContext.WriteString(fmt.Sprintf("#### %s\n\n", strings.ToUpper(method)))
 
 				if operation.Summary != "" {
-					context.WriteString(fmt.Sprintf("Summary: %s\n\n", operation.Summary))
+					apiContext.WriteString(fmt.Sprintf("Summary: %s\n\n", operation.Summary))
 				}
 
 				if operation.Description != "" {
-					context.WriteString(fmt.Sprintf("Description: %s\n\n", operation.Description))
+					apiContext.WriteString(fmt.Sprintf("Description: %s\n\n", operation.Description))
 				}
 
 				// Parameters
 				if len(operation.Parameters) > 0 {
-					context.WriteString("Parameters:\n")
+					apiContext.WriteString("Parameters:\n")
 					for _, param := range operation.Parameters {
 						required := ""
 						if param.Value.Required {
 							required = " (Required)"
 						}
-						context.WriteString(fmt.Sprintf("- %s (%s)%s: %s\n",
+						apiContext.WriteString(fmt.Sprintf("- %s (%s)%s: %s\n",
 							param.Value.Name,
 							param.Value.In,
 							required,
 							param.Value.Description))
 					}
-					context.WriteString("\n")
+					apiContext.WriteString("\n")
 				}
 
 				// Request Body
 				if operation.RequestBody != nil && operation.RequestBody.Value != nil {
-					context.WriteString("Request Body:\n")
+					apiContext.WriteString("Request Body:\n")
 					if operation.RequestBody.Value.Description != "" {
-						context.WriteString(fmt.Sprintf("Description: %s\n", operation.RequestBody.Value.Description))
+						apiContext.WriteString(fmt.Sprintf("Description: %s\n", operation.RequestBody.Value.Description))
 					}
 
 					for contentType, mediaType := range operation.RequestBody.Value.Content {
-						context.WriteString(fmt.Sprintf("Content-Type: %s\n", contentType))
+						apiContext.WriteString(fmt.Sprintf("Content-Type: %s\n", contentType))
 						if mediaType.Schema != nil {
 							if mediaType.Schema.Ref != "" {
-								context.WriteString(fmt.Sprintf("Schema Reference: %s\n", mediaType.Schema.Ref))
+								apiContext.WriteString(fmt.Sprintf("Schema Reference: %s\n", mediaType.Schema.Ref))
 							} else if mediaType.Schema.Value != nil {
-								context.WriteString(fmt.Sprintf("Schema Type: %s\n", mediaType.Schema.Value.Type))
+								apiContext.WriteString(fmt.Sprintf("Schema Type: %s\n", mediaType.Schema.Value.Type))
 							}
 						}
 					}
-					context.WriteString("\n")
+					apiContext.WriteString("\n")
 				}
 
 				// Responses
 				if operation.Responses != nil {
-					context.WriteString("Responses:\n")
+					apiContext.WriteString("Responses:\n")
 					for status, response := range operation.Responses.Map() {
 						if response != nil && response.Value != nil {
 							desc := "No description provided"
 							if response.Value.Description != nil && *response.Value.Description != "" {
 								desc = *response.Value.Description
 							}
-							context.WriteString(fmt.Sprintf("- %s: %s\n", status, desc))
+							apiContext.WriteString(fmt.Sprintf("- %s: %s\n", status, desc))
 						}
 					}
-					context.WriteString("\n")
+					apiContext.WriteString("\n")
 				}
 			}
 		}
 	}
 
 	return &MCPResponse{
-		Context: context.String(),
+		Context: apiContext.String(),
 	}, nil
 }
 
@@ -376,9 +321,13 @@ func (h *MCPHandler) RegisterSpec(w http.ResponseWriter, r *http.Request) {
 
 	Logger.Infow("Successfully registered spec", "id", specID, "title", spec.Info.Title)
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"id": specID,
-	})
+	}); err != nil {
+		Logger.Errorw("Failed to encode response", "error", err)
+		// We've already set the status code, so we can't use http.Error here
+		// Just log the error since headers are already sent
+	}
 }
 
 // GetSpec gets a registered OpenAPI specification
@@ -394,7 +343,11 @@ func (h *MCPHandler) GetSpec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	json.NewEncoder(w).Encode(spec)
+	if err := json.NewEncoder(w).Encode(spec); err != nil {
+		Logger.Errorw("Failed to encode api specs", "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
 }
 
 // ListEndpoints lists all endpoints in a registered OpenAPI specification
@@ -433,7 +386,11 @@ func (h *MCPHandler) ListEndpoints(w http.ResponseWriter, r *http.Request) {
 	}
 
 	Logger.Infow("Returning endpoints", "count", len(endpoints))
-	json.NewEncoder(w).Encode(endpoints)
+	if err := json.NewEncoder(w).Encode(endpoints); err != nil {
+		Logger.Errorw("Failed to encode endpoints", "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
 }
 
 // Add this method to the MCPHandler struct
