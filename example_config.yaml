@@ -16,13 +16,14 @@ server:
 
 # GitHub configuration
 github:
-  # GitHub token for accessing private repositories
+  # GitHub token for accessing private repositories or avoiding rate limits
   # You can also use the MCP_OPENAPI_GITHUB_TOKEN environment variable
+  # See README.md for instructions on how to generate a GitHub token
   token: ""
 
 # List of OpenAPI specifications to load at startup
 # Each entry can be a URL, GitHub repository, or file path
 specs:
   # - https://petstore3.swagger.io/api/v3/openapi.json
-  # - @github.com/swagger-api/swagger-petstore/blob/master/src/main/resources/openapi.yaml
+  # - "@github.com/swagger-api/swagger-petstore/blob/master/src/main/resources/openapi.yaml"
   # - ./openapi.yaml

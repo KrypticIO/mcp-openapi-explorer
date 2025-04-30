@@ -1,0 +1,105 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*' # Run workflow on version tags, e.g., v1.0.0
+
+jobs:
+  build:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        include:
+          - os: darwin
+            arch: amd64
+            name: macOS-intel-x86_64
+          - os: darwin
+            arch: arm64
+            name: macOS-apple-silicon
+          - os: linux
+            arch: amd64
+            name: linux-intel-x86_64
+          - os: linux
+            arch: arm64
+            name: linux-arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch all history and tags
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24' # Use the version that matches your project
+          cache: true
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: 0 # Disable CGO for better compatibility
+        run: |
+          BINARY_NAME="mcp-openapi-explorer-${{ env.VERSION }}-${{ matrix.name }}"
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            BINARY_NAME="${BINARY_NAME}.exe"
+          fi
+          echo "Building ${BINARY_NAME}..."
+          go build -ldflags="-s -w -X github.com/krypticlabs/mcp-openapi-explorer/cmd.Version=${{ env.VERSION }}" -o "${BINARY_NAME}" .
+          
+          # Create a checksum file
+          sha256sum "${BINARY_NAME}" > "${BINARY_NAME}.sha256"
+          
+          echo "BINARY_NAME=${BINARY_NAME}" >> $GITHUB_ENV
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BINARY_NAME }}
+          path: |
+            ${{ env.BINARY_NAME }}
+            ${{ env.BINARY_NAME }}.sha256
+          if-no-files-found: error
+          retention-days: 1
+
+  create-release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: List downloaded artifacts
+        run: find ./artifacts -type f | sort
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ env.VERSION }}
+          draft: false
+          prerelease: ${{ contains(env.VERSION, 'beta') || contains(env.VERSION, 'alpha') || contains(env.VERSION, 'rc') }}
+          generate_release_notes: true
+          files: ./artifacts/**/*
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 

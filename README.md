@@ -37,6 +37,119 @@ go mod download
 go build
 ```
 
+### Configuration
+
+MCP OpenAPI Explorer can be configured using a YAML configuration file. You can export a default configuration file using:
+
+```bash
+./mcp-openapi-explorer config export config.yaml
+```
+
+Then, modify the configuration file to suit your needs and run the server with:
+
+```bash
+./mcp-openapi-explorer --config config.yaml serve
+```
+
+### Creating a GitHub Token
+
+If you need to access private GitHub repositories or want to avoid rate limits when loading OpenAPI specs from GitHub, you'll need a GitHub token:
+
+1. Go to [GitHub Settings](https://github.com/settings/profile)
+2. Select **Developer settings** from the left sidebar
+3. Select **Personal access tokens** → **Tokens (classic)**
+4. Click **Generate new token** → **Generate new token (classic)**
+5. Give your token a descriptive name
+6. Select the appropriate scopes:
+   - For public repositories: `public_repo`
+   - For private repositories: `repo`
+7. Click **Generate token**
+8. Copy the token (you won't be able to see it again!)
+
+Add this token to your configuration file or provide it via the environment variable `MCP_OPENAPI_GITHUB_TOKEN`.
+
+### Configuring MCP Clients
+
+You can integrate MCP OpenAPI Explorer with MCP clients by adding it to your MCP client configuration. This allows the client to automatically start and communicate with the MCP server.
+
+#### Download the Binary
+
+Download the appropriate binary for your platform from the [GitHub Releases](https://github.com/krypticlabs/mcp-openapi-explorer/releases) page.
+
+#### MCP Client Configuration
+
+Add the MCP OpenAPI Explorer to your MCP client configuration file (typically `~/.mcp/config.json` or similar):
+
+```json
+{
+  "mcpServers": {
+    "openapi-explorer": {
+      "command": "/path/to/mcp-openapi-explorer",
+      "args": ["serve", "--config", "~/.mcp-openapi.yaml"],
+      "environment": {
+        "MCP_OPENAPI_GITHUB_TOKEN": "your_github_token"
+      }
+    }
+  }
+}
+```
+
+Replace `/path/to/mcp-openapi-explorer` with the actual path to the binary on your system. The `environment` section is optional and can be used to set environment variables for the MCP server.
+
+#### Modern Configuration with MCP Manager
+
+For users of the latest MCP clients with MCP Manager support:
+
+```json
+{
+  "managers": {
+    "mcp": {
+      "servers": {
+        "openapi-explorer": {
+          "binary": {
+            "path": "/path/to/mcp-openapi-explorer",
+            "args": ["serve", "--config", "~/.mcp-openapi.yaml"]
+          },
+          "autoStart": true,
+          "capabilities": ["openapi-exploration"],
+          "metadata": {
+            "description": "OpenAPI Explorer for interacting with API documentation"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+For containerized deployments, you can use:
+
+```json
+{
+  "managers": {
+    "mcp": {
+      "servers": {
+        "openapi-explorer": {
+          "container": {
+            "image": "ghcr.io/krypticlabs/mcp-openapi-explorer:latest",
+            "args": ["serve", "--config", "/app/config.yaml"],
+            "volumes": [
+              "~/.mcp-openapi.yaml:/app/config.yaml"
+            ],
+            "environment": {
+              "MCP_OPENAPI_GITHUB_TOKEN": "${GITHUB_TOKEN}"
+            }
+          },
+          "autoStart": true
+        }
+      }
+    }
+  }
+}
+```
+
+This configuration automatically starts the MCP OpenAPI Explorer when the MCP client is launched, making it available to your models.
+
 ## MCP Usage
 
 The MCP server operates via stdin/stdout, which is the preferred approach for integrating with LLMs. This avoids networking complexities and works well with various LLM integrations.
@@ -49,20 +162,19 @@ The MCP server operates via stdin/stdout, which is the preferred approach for in
 
 Options:
 - `-v, --verbose` - Enable verbose output
-- `-d, --specs-dir string` - Directory to store downloaded API specs (default "./specs")
-- `-s, --spec string` - Path or URL to OpenAPI specification (YAML or JSON) to load at startup
-- `-g, --github-token string` - GitHub token for accessing private repositories
+- `-c, --config string` - Path to configuration file
 
 ### GitHub Repository Support
 
 You can load OpenAPI specifications directly from GitHub repositories, including private ones with a token:
 
 ```bash
-# Public repository
-./mcp-openapi-explorer serve --spec @github.com/swagger-api/swagger-petstore/blob/master/src/main/resources/openapi.yaml
+# Configure GitHub token in your config file
+./mcp-openapi-explorer config export config.yaml
+# Edit config.yaml to add your GitHub token and specs to load
 
-# Private repository with token
-./mcp-openapi-explorer serve --spec @github.com/your-org/private-repo/blob/main/openapi.yaml --github-token YOUR_TOKEN
+# Then run the server with your config
+./mcp-openapi-explorer --config config.yaml serve
 ```
 
 ### Interacting with the MCP server
@@ -145,7 +257,7 @@ Instead of implementing our own search algorithm, we provide the complete API do
 
 ## How It Works
 
-1. Users load OpenAPI specifications into the server (optionally at startup with `--spec`)
+1. Users load OpenAPI specifications into the server (configured in the config file)
 2. The server parses and stores these specifications (supporting both JSON and YAML formats)
 3. When a user asks about an API endpoint, the server provides comprehensive context about all available endpoints
 4. The LLM uses this context to answer user queries accurately
@@ -167,11 +279,8 @@ docker build -t mcp-openapi-explorer .
 # Run the server with input from stdin
 docker run -i mcp-openapi-explorer serve < your-jsonrpc-request.json
 
-# Run the server with an OpenAPI spec from a URL
-docker run -i mcp-openapi-explorer serve --spec https://petstore3.swagger.io/api/v3/openapi.json
-
-# Run with a GitHub token for private repositories
-docker run -i -e GITHUB_TOKEN=your_token mcp-openapi-explorer serve --spec @github.com/your-org/private-repo/blob/main/api.yaml --github-token $GITHUB_TOKEN
+# Run the server with a configuration file
+docker run -i -v $(pwd)/config.yaml:/app/config.yaml mcp-openapi-explorer --config /app/config.yaml serve
 ```
 
 ## License
