@@ -8,7 +8,9 @@ A Model Context Protocol (MCP) server that analyzes OpenAPI specifications and p
 - Parse and provide comprehensive context about API endpoints
 - Support for the Model Context Protocol (MCP) via stdin/stdout
 - Provide intelligent context about API interactions to LLMs
+- Support for both JSON and YAML OpenAPI specifications
 - Built with Cobra CLI for easy command-line usage
+- Structured logging with Zap
 
 ## Getting Started
 
@@ -48,6 +50,20 @@ The MCP server operates via stdin/stdout, which is the preferred approach for in
 Options:
 - `-v, --verbose` - Enable verbose output
 - `-d, --specs-dir string` - Directory to store downloaded API specs (default "./specs")
+- `-s, --spec string` - Path or URL to OpenAPI specification (YAML or JSON) to load at startup
+- `-g, --github-token string` - GitHub token for accessing private repositories
+
+### GitHub Repository Support
+
+You can load OpenAPI specifications directly from GitHub repositories, including private ones with a token:
+
+```bash
+# Public repository
+./mcp-openapi-explorer serve --spec @github.com/swagger-api/swagger-petstore/blob/master/src/main/resources/openapi.yaml
+
+# Private repository with token
+./mcp-openapi-explorer serve --spec @github.com/your-org/private-repo/blob/main/openapi.yaml --github-token YOUR_TOKEN
+```
 
 ### Interacting with the MCP server
 
@@ -69,6 +85,12 @@ echo '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' | ./mcp-openap
 
 ```bash
 echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"load_api_spec","arguments":{"url":"https://petstore3.swagger.io/api/v3/openapi.json"}}}' | ./mcp-openapi-explorer serve
+```
+
+You can also load specifications directly from GitHub by prefixing with `@`:
+
+```bash
+echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"load_api_spec","arguments":{"url":"@github.com/swagger-api/swagger-petstore/blob/master/src/main/resources/openapi.yaml"}}}' | ./mcp-openapi-explorer serve
 ```
 
 #### List loaded API specifications
@@ -99,7 +121,11 @@ Get comprehensive information about API endpoints from loaded OpenAPI specificat
 Load an OpenAPI specification from a URL or file path.
 
 **Parameters:**
-- `url` (string, required): URL or file path to the OpenAPI spec (e.g. 'https://petstore3.swagger.io/api/v3/openapi.json' or 'file:///path/to/spec.json')
+- `url` (string, required): URL or file path to the OpenAPI spec. Supports:
+  - HTTP/HTTPS URLs (e.g., 'https://petstore3.swagger.io/api/v3/openapi.json')
+  - GitHub URLs with '@' prefix (e.g., '@github.com/org/repo/blob/main/api.yaml')
+  - Local file paths (e.g., 'file:///path/to/spec.json' or just '/path/to/spec.json')
+  - Both JSON and YAML formats are supported
 
 ### `list_api_specs`
 
@@ -119,8 +145,8 @@ Instead of implementing our own search algorithm, we provide the complete API do
 
 ## How It Works
 
-1. Users load OpenAPI specifications into the server
-2. The server parses and stores these specifications
+1. Users load OpenAPI specifications into the server (optionally at startup with `--spec`)
+2. The server parses and stores these specifications (supporting both JSON and YAML formats)
 3. When a user asks about an API endpoint, the server provides comprehensive context about all available endpoints
 4. The LLM uses this context to answer user queries accurately
 
@@ -137,7 +163,15 @@ chmod +x test-mcp.sh
 
 ```bash
 docker build -t mcp-openapi-explorer .
+
+# Run the server with input from stdin
 docker run -i mcp-openapi-explorer serve < your-jsonrpc-request.json
+
+# Run the server with an OpenAPI spec from a URL
+docker run -i mcp-openapi-explorer serve --spec https://petstore3.swagger.io/api/v3/openapi.json
+
+# Run with a GitHub token for private repositories
+docker run -i -e GITHUB_TOKEN=your_token mcp-openapi-explorer serve --spec @github.com/your-org/private-repo/blob/main/api.yaml --github-token $GITHUB_TOKEN
 ```
 
 ## License

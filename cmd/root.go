@@ -3,18 +3,23 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 var (
 	// Logger is the global logger instance
-	Logger = logrus.New()
+	Logger *zap.SugaredLogger
 
 	// Flags
 	verboseFlag bool
 	portFlag    string
+	specPath    string
+	githubToken string
+	useContext7 bool
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -28,15 +33,22 @@ It can load OpenAPI specifications from various sources (GitHub, local files, HT
 register multiple API specifications, and provide context about API interactions.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		// Setup logger based on verbose flag
+		config := zap.NewProductionConfig()
+		config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+
 		if verboseFlag {
-			Logger.SetLevel(logrus.DebugLevel)
+			config.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
 		} else {
-			Logger.SetLevel(logrus.InfoLevel)
+			config.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
 		}
 
-		Logger.SetFormatter(&logrus.TextFormatter{
-			FullTimestamp: true,
-		})
+		zapLogger, err := config.Build()
+		if err != nil {
+			fmt.Printf("Failed to create logger: %v\n", err)
+			os.Exit(1)
+		}
+
+		Logger = zapLogger.Sugar()
 	},
 }
 
@@ -53,4 +65,49 @@ func init() {
 	// Define persistent flags for all commands
 	rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "Enable verbose output")
 	rootCmd.PersistentFlags().StringVarP(&portFlag, "port", "p", "8080", "Port for the server to listen on")
+	rootCmd.PersistentFlags().StringVarP(&specPath, "spec", "s", "", "Path or URL to OpenAPI specification (YAML or JSON)")
+	rootCmd.PersistentFlags().StringVarP(&githubToken, "github-token", "g", "", "GitHub token for accessing private repositories")
+}
+
+// convertGitHubURLToRaw converts a GitHub URL to a raw.githubusercontent.com URL
+// If token is provided, it uses it for private repositories
+func convertGitHubURLToRaw(githubURL, token string) (string, error) {
+	// Remove any protocol prefix if present
+	githubURL = strings.TrimPrefix(githubURL, "https://")
+	githubURL = strings.TrimPrefix(githubURL, "http://")
+
+	// Ensure it's a GitHub URL
+	if !strings.HasPrefix(githubURL, "github.com") {
+		return "", fmt.Errorf("not a GitHub URL: %s", githubURL)
+	}
+
+	// Handle GitHub path
+	parts := strings.Split(githubURL, "/")
+	if len(parts) < 5 {
+		return "", fmt.Errorf("invalid GitHub URL format: %s", githubURL)
+	}
+
+	// Extract relevant parts
+	owner := parts[1]
+	repo := parts[2]
+
+	// Determine if it's a blob URL or not
+	var branch, path string
+	if parts[3] == "blob" {
+		branch = parts[4]
+		path = strings.Join(parts[5:], "/")
+	} else {
+		branch = parts[3]
+		path = strings.Join(parts[4:], "/")
+	}
+
+	// Construct raw URL
+	rawURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", owner, repo, branch, path)
+
+	// Add token if provided
+	if token != "" {
+		rawURL = fmt.Sprintf("https://%s@raw.githubusercontent.com/%s/%s/%s/%s", token, owner, repo, branch, path)
+	}
+
+	return rawURL, nil
 }

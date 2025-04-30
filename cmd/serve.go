@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -41,6 +42,49 @@ func startServer() {
 
 	// Create MCP handler with access to OpenAPI specs
 	handler := NewMCPHandler()
+
+	// If a spec path is provided via command line, load it immediately
+	if specPath != "" {
+		Logger.Infow("Loading initial OpenAPI spec from provided path", "path", specPath)
+
+		// Handle GitHub repositories
+		if strings.HasPrefix(specPath, "github.com") || strings.HasPrefix(specPath, "@github.com") {
+			// Trim any '@' prefix that might be used
+			path := strings.TrimPrefix(specPath, "@")
+
+			// Convert github.com URL to raw.githubusercontent.com
+			ghPath, err := convertGitHubURLToRaw(path, githubToken)
+			if err != nil {
+				Logger.Fatalw("Failed to process GitHub URL", "error", err, "path", path)
+			}
+			specPath = ghPath
+			Logger.Debugw("Converted GitHub URL", "path", specPath)
+		}
+
+		// Load the OpenAPI spec
+		ctx := context.Background()
+		spec, err := handler.loadOpenAPISpec(ctx, specPath)
+		if err != nil {
+			Logger.Fatalw("Failed to load initial OpenAPI spec", "error", err, "path", specPath)
+		}
+
+		// Generate a unique ID for this spec and store it
+		specID := spec.Info.Title
+		handler.specs[specID] = &APISpec{
+			URL:  specPath,
+			Spec: spec,
+		}
+
+		// Save the spec to a file for persistence
+		if err := handler.saveSpec(specID, handler.specs[specID]); err != nil {
+			Logger.Warnw("Failed to save initial spec", "error", err, "specID", specID)
+		}
+
+		Logger.Infow("Successfully loaded initial API spec",
+			"title", spec.Info.Title,
+			"version", spec.Info.Version,
+			"endpoints", len(spec.Paths.Map()))
+	}
 
 	// Create MCP server
 	mcpServer := server.NewMCPServer(
@@ -97,6 +141,20 @@ func startServer() {
 			return mcp.NewToolResultError("url parameter must be a string"), nil
 		}
 
+		// Handle GitHub repositories
+		if strings.HasPrefix(url, "github.com") || strings.HasPrefix(url, "@github.com") {
+			// Trim any '@' prefix that might be used
+			path := strings.TrimPrefix(url, "@")
+
+			// Convert github.com URL to raw.githubusercontent.com
+			ghPath, err := convertGitHubURLToRaw(path, githubToken)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("Failed to process GitHub URL: %v", err)), nil
+			}
+			url = ghPath
+			Logger.Debugw("Converted GitHub URL", "path", url)
+		}
+
 		// Load the OpenAPI spec
 		spec, err := handler.loadOpenAPISpec(ctx, url)
 		if err != nil {
@@ -112,7 +170,7 @@ func startServer() {
 
 		// Save the spec to a file for persistence
 		if err := handler.saveSpec(specID, handler.specs[specID]); err != nil {
-			Logger.Warnf("Failed to save spec: %v", err)
+			Logger.Warnw("Failed to save spec", "error", err, "specID", specID)
 		}
 
 		return mcp.NewToolResultText(fmt.Sprintf("Successfully loaded API spec: %s (version %s)", spec.Info.Title, spec.Info.Version)), nil
@@ -175,8 +233,8 @@ func startServer() {
 	// Start the stdio server
 	// This approach uses stdin/stdout for MCP communication which is simpler than HTTP/SSE
 	// and works well with command-line tools and LLM integrations
-	Logger.Info("Starting OpenAPI Explorer MCP server via stdio...")
+	Logger.Infow("Starting OpenAPI Explorer MCP server via stdio...", "specsDir", specsDir)
 	if err := server.ServeStdio(mcpServer); err != nil {
-		Logger.Fatalf("Server error: %v", err)
+		Logger.Fatalw("Server error", "error", err)
 	}
 }

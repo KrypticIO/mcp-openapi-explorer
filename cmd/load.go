@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"context"
-	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -30,37 +30,59 @@ func loadSpec(url string) {
 	// Create the MCP handler
 	handler := NewMCPHandler()
 
+	// Process GitHub URL if applicable
+	if strings.HasPrefix(url, "github.com") || strings.HasPrefix(url, "@github.com") {
+		// Trim any '@' prefix that might be used
+		path := strings.TrimPrefix(url, "@")
+
+		// Convert github.com URL to raw.githubusercontent.com
+		ghPath, err := convertGitHubURLToRaw(path, githubToken)
+		if err != nil {
+			Logger.Fatalw("Failed to process GitHub URL", "error", err, "url", url)
+		}
+		url = ghPath
+		Logger.Debugw("Converted GitHub URL", "url", url)
+	}
+
 	// Load the spec
-	Logger.Infof("Loading OpenAPI spec from URL: %s", url)
+	Logger.Infow("Loading OpenAPI spec", "url", url)
 	spec, err := handler.loadOpenAPISpec(context.Background(), url)
 	if err != nil {
-		Logger.Fatalf("Failed to load OpenAPI spec: %v", err)
+		Logger.Fatalw("Failed to load OpenAPI spec", "error", err, "url", url)
 	}
 
 	// Generate a unique ID for this spec
-	specID := filepath.Base(url)
+	specID := spec.Info.Title // Use title instead of filename for better identification
 	handler.specs[specID] = &APISpec{
 		URL:  url,
 		Spec: spec,
 	}
 
-	Logger.Infof("Successfully loaded spec with ID: %s", specID)
-	Logger.Infof("Title: %s", spec.Info.Title)
-	Logger.Infof("Version: %s", spec.Info.Version)
+	// Save the spec to disk
+	if err := handler.saveSpec(specID, handler.specs[specID]); err != nil {
+		Logger.Warnw("Failed to save spec", "error", err, "specID", specID)
+	}
+
+	Logger.Infow("Successfully loaded spec",
+		"id", specID,
+		"title", spec.Info.Title,
+		"version", spec.Info.Version)
 
 	if spec.Paths != nil {
 		paths := spec.Paths.Map()
-		Logger.Infof("Found %d endpoints", len(paths))
+		Logger.Infow("Found endpoints", "count", len(paths))
 
 		// Print a few sample endpoints
 		count := 0
 		for path, item := range paths {
 			for method, operation := range item.Operations() {
-				Logger.Infof("Endpoint: %s %s", method, path)
-				Logger.Infof("  Summary: %s", operation.Summary)
+				Logger.Infow("Endpoint",
+					"method", method,
+					"path", path,
+					"summary", operation.Summary)
 				count++
 				if count >= 5 {
-					Logger.Infof("... and more endpoints")
+					Logger.Info("... and more endpoints")
 					return
 				}
 			}

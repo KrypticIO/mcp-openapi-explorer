@@ -13,5 +13,12 @@ FROM alpine:latest
 WORKDIR /app
 COPY --from=builder /app/mcp-openapi-explorer .
 
-EXPOSE 8080
-CMD ["./mcp-openapi-explorer"] 
+# Create specs directory
+RUN mkdir -p /app/specs
+
+# Set up environment variables
+ENV GITHUB_TOKEN=""
+
+# Default to serve command
+ENTRYPOINT ["./mcp-openapi-explorer"]
+CMD ["serve"] 
