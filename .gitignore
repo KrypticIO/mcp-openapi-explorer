@@ -6,6 +6,8 @@
 *.dylib
 mcp-openapi-explorer
 
+specs/
+
 # Test binary, built with `go test -c`
 *.test
 
