@@ -3,12 +3,21 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
+
+// Create a bootstrap stderr-only logger for initialization errors
+// that won't interfere with stdout/JSON-RPC communication
+func initErrorf(format string, args ...interface{}) {
+	// Write directly to stderr to avoid any stdout interference
+	fmt.Fprintf(os.Stderr, "ERROR: "+format+"\n", args...)
+	os.Exit(1)
+}
 
 var (
 	// Logger is the global logger instance
@@ -32,21 +41,71 @@ OpenAPI specifications and provides context about interacting with APIs.
 It can load OpenAPI specifications from various sources (GitHub, local files, HTTP URLs),
 register multiple API specifications, and provide context about API interactions.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		// Setup logger based on verbose flag
-		config := zap.NewProductionConfig()
-		config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+		var cores []zapcore.Core
+		var logLevel zapcore.Level
 
+		// Set log level based on verbose flag or config
 		if verboseFlag {
-			config.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
+			logLevel = zap.DebugLevel
+		} else if Config.Logging.Level != "" {
+			switch strings.ToLower(Config.Logging.Level) {
+			case "debug":
+				logLevel = zap.DebugLevel
+			case "info":
+				logLevel = zap.InfoLevel
+			case "warn":
+				logLevel = zap.WarnLevel
+			case "error":
+				logLevel = zap.ErrorLevel
+			default:
+				logLevel = zap.InfoLevel
+			}
 		} else {
-			config.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
+			logLevel = zap.InfoLevel
 		}
 
-		zapLogger, err := config.Build()
-		if err != nil {
-			fmt.Printf("Failed to create logger: %v\n", err)
-			os.Exit(1)
+		// Create encoder based on format
+		var encoder zapcore.Encoder
+		if strings.ToLower(Config.Logging.Format) == "text" {
+			encoderConfig := zap.NewDevelopmentEncoderConfig()
+			encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+			encoder = zapcore.NewConsoleEncoder(encoderConfig)
+		} else {
+			encoderConfig := zap.NewProductionEncoderConfig()
+			encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+			encoder = zapcore.NewJSONEncoder(encoderConfig)
 		}
+
+		// Logger should output to stderr, not stdout to avoid interfering with JSON-RPC
+		stderrSyncer := zapcore.AddSync(os.Stderr)
+		cores = append(cores, zapcore.NewCore(encoder, stderrSyncer, logLevel))
+
+		// Add file logging if debug=true and directory is specified
+		if Config.Logging.Debug && Config.Logging.Directory != "" {
+			// Ensure the log directory exists
+			if err := os.MkdirAll(Config.Logging.Directory, 0755); err != nil {
+				initErrorf("Failed to create log directory: %v", err)
+			}
+
+			// Set up file logging
+			logPath := filepath.Join(Config.Logging.Directory, Config.Logging.Filename)
+			fileSyncer, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if err != nil {
+				initErrorf("Failed to open log file: %v", err)
+			}
+
+			// Create a separate encoder for file logs (always JSON for better parsing)
+			fileEncoderConfig := zap.NewProductionEncoderConfig()
+			fileEncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+			fileEncoder := zapcore.NewJSONEncoder(fileEncoderConfig)
+
+			cores = append(cores, zapcore.NewCore(fileEncoder, zapcore.AddSync(fileSyncer), logLevel))
+			// No longer directly writing to stdout
+		}
+
+		// Combine cores and create the logger
+		core := zapcore.NewTee(cores...)
+		zapLogger := zap.New(core, zap.AddCaller(), zap.AddStacktrace(zap.ErrorLevel))
 
 		Logger = zapLogger.Sugar()
 	},
@@ -56,7 +115,7 @@ register multiple API specifications, and provide context about API interactions
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
@@ -69,8 +128,7 @@ func init() {
 
 		// Initialize config using Viper
 		if err := initConfig(); err != nil {
-			fmt.Printf("Error loading configuration: %v\n", err)
-			os.Exit(1)
+			initErrorf("Error loading configuration: %v", err)
 		}
 
 		// Set the global specsDir variable from config

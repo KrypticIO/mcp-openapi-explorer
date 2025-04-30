@@ -499,3 +499,51 @@ func (h *MCPHandler) loadSpecs() error {
 	Logger.Infow("Loaded specs", "count", len(h.specs), "dir", specsDir)
 	return nil
 }
+
+// deleteSpec removes a spec from memory and deletes its file
+func (h *MCPHandler) deleteSpec(specID string) error {
+	// Safety check - make sure we have a valid specID
+	if specID == "" {
+		return fmt.Errorf("empty spec ID provided")
+	}
+
+	// Check if the spec exists
+	_, exists := h.specs[specID]
+	if !exists {
+		return fmt.Errorf("spec not found: %s", specID)
+	}
+
+	// Get a clean filename - avoid any potential path traversal issues
+	sanitizedSpecID := filepath.Base(specID)
+	specPath := filepath.Join(specsDir, sanitizedSpecID+".json")
+
+	// Create a copy of the spec reference before deletion (for logging)
+	specCopy := h.specs[specID]
+	specTitle := "unknown"
+	if specCopy != nil && specCopy.Spec != nil && specCopy.Spec.Info != nil {
+		specTitle = specCopy.Spec.Info.Title
+	}
+
+	// Delete the spec file if it exists
+	if err := os.Remove(specPath); err != nil && !os.IsNotExist(err) {
+		// Log the error but continue - we'll still remove from memory
+		Logger.Warnw("Failed to delete spec file",
+			"error", err,
+			"specID", specID,
+			"title", specTitle,
+			"path", specPath)
+	} else {
+		Logger.Debugw("Deleted spec file",
+			"specID", specID,
+			"title", specTitle,
+			"path", specPath)
+	}
+
+	// Remove from memory
+	delete(h.specs, specID)
+	Logger.Infow("Removed spec from memory",
+		"specID", specID,
+		"title", specTitle)
+
+	return nil
+}

@@ -12,8 +12,11 @@ import (
 // AppConfig is the main application configuration structure
 type AppConfig struct {
 	Logging struct {
-		Level  string `mapstructure:"level"`
-		Format string `mapstructure:"format"`
+		Level     string `mapstructure:"level"`
+		Format    string `mapstructure:"format"`
+		Debug     bool   `mapstructure:"debug"`
+		Directory string `mapstructure:"directory"`
+		Filename  string `mapstructure:"filename"`
 	} `mapstructure:"logging"`
 
 	Server struct {
@@ -69,6 +72,9 @@ func initConfig() error {
 	// Set defaults
 	viper.SetDefault("logging.level", "info")
 	viper.SetDefault("logging.format", "json")
+	viper.SetDefault("logging.debug", false)
+	viper.SetDefault("logging.directory", "")
+	viper.SetDefault("logging.filename", "mcp-openapi-explorer.log")
 	viper.SetDefault("server.port", 8080)
 	viper.SetDefault("server.specs_dir", "./specs")
 
@@ -109,6 +115,9 @@ func WriteConfigFile(path string) error {
 	// Set the config to match current settings
 	viper.Set("logging.level", Config.Logging.Level)
 	viper.Set("logging.format", Config.Logging.Format)
+	viper.Set("logging.debug", Config.Logging.Debug)
+	viper.Set("logging.directory", Config.Logging.Directory)
+	viper.Set("logging.filename", Config.Logging.Filename)
 	viper.Set("server.port", Config.Server.Port)
 	viper.Set("server.specs_dir", Config.Server.SpecsDir)
 	viper.Set("github.token", Config.GitHub.Token)
@@ -135,6 +144,12 @@ logging:
   level: info
   # Log format (json or text)
   format: json
+  # Enable debug logging to file
+  debug: false
+  # Directory to store log files (if empty, file logging is disabled)
+  directory: ""
+  # Filename for log files (default: mcp-openapi-explorer.log)
+  filename: "mcp-openapi-explorer.log"
 
 # Server configuration
 server:

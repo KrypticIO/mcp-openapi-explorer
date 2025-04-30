@@ -145,6 +145,25 @@ Load an OpenAPI specification from a URL or file path.
 
 List all loaded OpenAPI specifications.
 
+### `delete_api_spec`
+
+Delete a loaded OpenAPI specification.
+
+**Parameters:**
+- `spec_id` (string, required): ID of the API spec to delete (use list_api_specs to see available specs)
+
+#### Get information about API endpoints
+
+```bash
+echo '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"get_api_info","arguments":{"query":"How do I find pets by status?"}}}' | ./mcp-openapi-explorer serve
+```
+
+#### Delete a loaded API specification
+
+```bash
+echo '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"delete_api_spec","arguments":{"spec_id":"Swagger Petstore - OpenAPI 3.0"}}}' | ./mcp-openapi-explorer serve
+```
+
 ## How It Works
 
 1. Users load OpenAPI specifications into the server (configured in the config file)

@@ -206,6 +206,49 @@ func startServer() {
 		return mcp.NewToolResultText(result), nil
 	})
 
+	// Add a tool to delete an API spec
+	deleteSpecTool := mcp.NewTool(
+		"delete_api_spec",
+		mcp.WithDescription("Delete a loaded OpenAPI specification"),
+		mcp.WithString("spec_id",
+			mcp.Required(),
+			mcp.Description("ID of the API spec to delete (use list_api_specs to see available specs)"),
+		),
+	)
+
+	// Register the delete_api_spec tool
+	mcpServer.AddTool(deleteSpecTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		specID, ok := req.Params.Arguments["spec_id"].(string)
+		if !ok {
+			Logger.Errorw("Invalid spec_id parameter", "params", req.Params.Arguments)
+			return mcp.NewToolResultError("spec_id parameter must be a string"), nil
+		}
+
+		// Check if the spec exists before trying to delete it
+		_, exists := handler.specs[specID]
+		if !exists {
+			Logger.Warnw("Spec not found", "specID", specID)
+			return mcp.NewToolResultError(fmt.Sprintf("Spec not found: %s", specID)), nil
+		}
+
+		// Use a defer/recover to catch any potential panics
+		defer func() {
+			if r := recover(); r != nil {
+				Logger.Errorw("Panic in delete_api_spec", "error", r)
+			}
+		}()
+
+		// Delete the spec
+		err := handler.deleteSpec(specID)
+		if err != nil {
+			Logger.Errorw("Failed to delete spec", "error", err, "specID", specID)
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to delete spec: %v", err)), nil
+		}
+
+		Logger.Infow("Successfully deleted spec", "specID", specID)
+		return mcp.NewToolResultText(fmt.Sprintf("Successfully deleted API spec: %s", specID)), nil
+	})
+
 	// Add a resource that provides system information
 	systemResource := mcp.NewResource(
 		"openapi://system",
@@ -240,6 +283,16 @@ func startServer() {
 	// This approach uses stdin/stdout for MCP communication which is simpler than HTTP/SSE
 	// and works well with command-line tools and LLM integrations
 	Logger.Infow("Starting OpenAPI Explorer MCP server via stdio...", "specsDir", specsDir)
+
+	// Use a defer to catch any panics during server execution
+	defer func() {
+		if r := recover(); r != nil {
+			Logger.Errorw("Server panic", "error", r)
+			// If we get here, something really bad happened
+			os.Exit(1)
+		}
+	}()
+
 	if err := server.ServeStdio(mcpServer); err != nil {
 		Logger.Fatalw("Server error", "error", err)
 	}
