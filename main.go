@@ -1,6 +1,6 @@
 package main
 
-import "github.com/krypticlabs/mcp-openapi-explorer/cmd"
+import "github.com/krypticio/mcp-openapi-explorer/cmd"
 
 func main() {
 	cmd.Execute()
