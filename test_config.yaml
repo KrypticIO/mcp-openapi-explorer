@@ -1,0 +1,20 @@
+# Test MCP OpenAPI Explorer Configuration
+
+# Logging configuration
+logging:
+  level: debug
+  format: text
+
+# Server configuration
+server:
+  port: 8081
+  specs_dir: ./custom_specs
+
+# GitHub configuration
+github:
+  token: "test_token"
+
+# List of OpenAPI specifications to load at startup
+specs:
+  - https://petstore3.swagger.io/api/v3/openapi.json
+  - "@github.com/swagger-api/swagger-petstore/blob/master/src/main/resources/openapi.yaml" 

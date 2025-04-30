@@ -1,0 +1,28 @@
+# MCP OpenAPI Explorer Configuration
+
+# Logging configuration
+logging:
+  # Log level (debug, info, warn, error)
+  level: info
+  # Log format (json or text)
+  format: json
+
+# Server configuration
+server:
+  # Server port
+  port: 8080
+  # Directory to store downloaded API specs
+  specs_dir: ./specs
+
+# GitHub configuration
+github:
+  # GitHub token for accessing private repositories
+  # You can also use the MCP_OPENAPI_GITHUB_TOKEN environment variable
+  token: ""
+
+# List of OpenAPI specifications to load at startup
+# Each entry can be a URL, GitHub repository, or file path
+specs:
+  # - https://petstore3.swagger.io/api/v3/openapi.json
+  # - @github.com/swagger-api/swagger-petstore/blob/master/src/main/resources/openapi.yaml
+  # - ./openapi.yaml
