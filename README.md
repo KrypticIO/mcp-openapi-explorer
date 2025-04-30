@@ -57,14 +57,17 @@ If you need to access private GitHub repositories or want to avoid rate limits w
 
 1. Go to [GitHub Settings](https://github.com/settings/profile)
 2. Select **Developer settings** from the left sidebar
-3. Select **Personal access tokens** → **Tokens (classic)**
-4. Click **Generate new token** → **Generate new token (classic)**
-5. Give your token a descriptive name
-6. Select the appropriate scopes:
-   - For public repositories: `public_repo`
-   - For private repositories: `repo`
-7. Click **Generate token**
-8. Copy the token (you won't be able to see it again!)
+3. Select **Personal access tokens** → **Fine-grained tokens**
+4. Click **Generate new token** → **Generate new token**
+5. Give your token a descriptive name and description
+   ![GitHub fine-grained PAT](images/fine_grained_pat.png)
+6. Repository access: **only select repositories**
+   - then select the repositories you want to give this PAT access to
+7. Permissions:
+   - The only permission this needs is the **contents** permission and **read-only** access
+     ![GitHub permissions selection](images/github_permissions_selection.png)
+8. Click **Generate token**
+9. Copy the token (you won't be able to see it again!)
 
 Add this token to your configuration file or provide it via the environment variable `MCP_OPENAPI_GITHUB_TOKEN`.
 
@@ -85,70 +88,13 @@ Add the MCP OpenAPI Explorer to your MCP client configuration file (typically `~
   "mcpServers": {
     "openapi-explorer": {
       "command": "/path/to/mcp-openapi-explorer",
-      "args": ["serve", "--config", "~/.mcp-openapi.yaml"],
-      "environment": {
-        "MCP_OPENAPI_GITHUB_TOKEN": "your_github_token"
-      }
+      "args": ["serve", "--config", "~/.mcp-openapi.yaml"]
     }
   }
 }
 ```
 
 Replace `/path/to/mcp-openapi-explorer` with the actual path to the binary on your system. The `environment` section is optional and can be used to set environment variables for the MCP server.
-
-#### Modern Configuration with MCP Manager
-
-For users of the latest MCP clients with MCP Manager support:
-
-```json
-{
-  "managers": {
-    "mcp": {
-      "servers": {
-        "openapi-explorer": {
-          "binary": {
-            "path": "/path/to/mcp-openapi-explorer",
-            "args": ["serve", "--config", "~/.mcp-openapi.yaml"]
-          },
-          "autoStart": true,
-          "capabilities": ["openapi-exploration"],
-          "metadata": {
-            "description": "OpenAPI Explorer for interacting with API documentation"
-          }
-        }
-      }
-    }
-  }
-}
-```
-
-For containerized deployments, you can use:
-
-```json
-{
-  "managers": {
-    "mcp": {
-      "servers": {
-        "openapi-explorer": {
-          "container": {
-            "image": "ghcr.io/krypticlabs/mcp-openapi-explorer:latest",
-            "args": ["serve", "--config", "/app/config.yaml"],
-            "volumes": [
-              "~/.mcp-openapi.yaml:/app/config.yaml"
-            ],
-            "environment": {
-              "MCP_OPENAPI_GITHUB_TOKEN": "${GITHUB_TOKEN}"
-            }
-          },
-          "autoStart": true
-        }
-      }
-    }
-  }
-}
-```
-
-This configuration automatically starts the MCP OpenAPI Explorer when the MCP client is launched, making it available to your models.
 
 ## MCP Usage
 
@@ -168,53 +114,9 @@ Options:
 
 You can load OpenAPI specifications directly from GitHub repositories, including private ones with a token:
 
-```bash
-# Configure GitHub token in your config file
-./mcp-openapi-explorer config export config.yaml
-# Edit config.yaml to add your GitHub token and specs to load
-
-# Then run the server with your config
-./mcp-openapi-explorer --config config.yaml serve
-```
-
-### Interacting with the MCP server
-
-You can interact with the MCP server by sending JSON-RPC messages to its stdin:
-
-#### Initialize the MCP connection
-
-```bash
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test-script","version":"1.0.0"}}}' | ./mcp-openapi-explorer serve
-```
-
-#### List available tools
-
-```bash
-echo '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' | ./mcp-openapi-explorer serve
-```
-
-#### Load an OpenAPI specification
-
-```bash
-echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"load_api_spec","arguments":{"url":"https://petstore3.swagger.io/api/v3/openapi.json"}}}' | ./mcp-openapi-explorer serve
-```
-
-You can also load specifications directly from GitHub by prefixing with `@`:
-
-```bash
-echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"load_api_spec","arguments":{"url":"@github.com/swagger-api/swagger-petstore/blob/master/src/main/resources/openapi.yaml"}}}' | ./mcp-openapi-explorer serve
-```
-
-#### List loaded API specifications
-
-```bash
-echo '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_api_specs"}}' | ./mcp-openapi-explorer serve
-```
-
-#### Get information about API endpoints
-
-```bash
-echo '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"get_api_info","arguments":{"query":"How do I find pets by status?"}}}' | ./mcp-openapi-explorer serve
+```yaml
+specs:
+  - "@github.com/yourOrg/yourRepo/blob/main/pathToSpec.json|yaml"
 ```
 
 ## Available MCP Tools
@@ -243,33 +145,12 @@ Load an OpenAPI specification from a URL or file path.
 
 List all loaded OpenAPI specifications.
 
-## MCP Resources
-
-### `openapi://system`
-
-Provides information about the OpenAPI Explorer system, including loaded specifications.
-
-## Integration with LLMs
-
-This MCP server is designed to be integrated with LLMs to provide context about API interactions. The LLM uses the context provided by the server to understand API endpoints and guide users on how to interact with APIs.
-
-Instead of implementing our own search algorithm, we provide the complete API documentation to the LLM, leveraging the LLM's natural language understanding capabilities to match user queries with relevant API endpoints.
-
 ## How It Works
 
 1. Users load OpenAPI specifications into the server (configured in the config file)
 2. The server parses and stores these specifications (supporting both JSON and YAML formats)
 3. When a user asks about an API endpoint, the server provides comprehensive context about all available endpoints
 4. The LLM uses this context to answer user queries accurately
-
-## Example Usage Script
-
-You can use the included `test-mcp.sh` script to interact with the MCP server:
-
-```bash
-chmod +x test-mcp.sh
-./test-mcp.sh
-```
 
 ## Docker
 
