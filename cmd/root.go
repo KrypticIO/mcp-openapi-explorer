@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/krypticio/mcp-openapi-explorer/internal/config"
-	"github.com/krypticio/mcp-openapi-explorer/internal/github"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -104,7 +103,8 @@ register multiple API specifications, and provide context about API interactions
 			fileEncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 			fileEncoder := zapcore.NewJSONEncoder(fileEncoderConfig)
 
-			cores = append(cores, zapcore.NewCore(fileEncoder, zapcore.AddSync(fileSyncer), logLevel))
+			// Use DebugLevel for the file logger if enabled, otherwise use the console level
+			cores = append(cores, zapcore.NewCore(fileEncoder, zapcore.AddSync(fileSyncer), zap.DebugLevel))
 		}
 
 		// Combine cores and create the logger
@@ -150,9 +150,4 @@ func init() {
 	// Define persistent flags for all commands
 	rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "Enable verbose output")
 	rootCmd.PersistentFlags().StringVarP(&configFlag, "config", "c", "", "Path to configuration file")
-}
-
-// ConvertGitHubURLToRaw is a wrapper for the github package
-func ConvertGitHubURLToRaw(githubURL, token string) (string, error) {
-	return github.ConvertGitHubURLToRaw(githubURL, token)
 }

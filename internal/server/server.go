@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/krypticio/mcp-openapi-explorer/internal/github"
@@ -171,40 +172,30 @@ func (s *Server) Start() error {
 		}
 	}()
 
-	if err := server.ServeStdio(s.mcpServer); err != nil {
+	// Add more defensive error handling for ServeStdio
+	err := server.ServeStdio(s.mcpServer)
+	if err != nil {
+		// Handle context cancellation gracefully
+		if errors.Is(err, context.Canceled) {
+			s.logger.Infow("Server stopped due to context cancellation", "error", err)
+			return nil // This is an expected error when shutting down
+		}
+
+		if errors.Is(err, io.EOF) {
+			s.logger.Warnw("Connection closed by client (EOF)", "error", err)
+			return nil // Handle gracefully for EOF
+		}
+
+		if errors.Is(err, io.ErrClosedPipe) {
+			s.logger.Warnw("Connection pipe closed", "error", err)
+			return nil // Handle gracefully for closed pipe
+		}
+
+		// Any other error is logged as an error
 		s.logger.Errorw("Server error", "error", err)
 		return fmt.Errorf("%w: %v", ErrServerStart, err)
 	}
 
+	s.logger.Infow("Server stopped gracefully")
 	return nil
-}
-
-// StartServer starts the MCP OpenAPI explorer server (legacy function)
-func StartServer(specsDir string, logger LoggerInterface, config ConfigInterface) error {
-	logger.Infow("Creating server using legacy function", "specs_dir", specsDir)
-	s, err := CreateServer(specsDir, logger, config)
-	if err != nil {
-		return fmt.Errorf("failed to create server: %w", err)
-	}
-	return s.Start()
-}
-
-// Helper function to check if a URL is a GitHub URL (deprecated, use github.IsGitHubURL instead)
-func IsGitHubURL(url string) bool {
-	return github.IsGitHubURL(url)
-}
-
-// Helper function to trim GitHub URL prefix (deprecated, use github.TrimGitHubPrefix instead)
-func TrimGitHubPrefix(url string) string {
-	return github.TrimGitHubPrefix(url)
-}
-
-// isGitHubURL is a wrapper for the github package
-func isGitHubURL(url string) bool {
-	return github.IsGitHubURL(url)
-}
-
-// trimGitHubPrefix is a wrapper for the github package
-func trimGitHubPrefix(url string) string {
-	return github.TrimGitHubPrefix(url)
 }

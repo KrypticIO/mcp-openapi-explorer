@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/krypticio/mcp-openapi-explorer/internal/github"
 	"github.com/spf13/viper"
 )
 
@@ -21,7 +20,6 @@ type Config struct {
 	} `mapstructure:"logging" yaml:"logging"`
 
 	Server struct {
-		Port     int    `mapstructure:"port" yaml:"port"`
 		SpecsDir string `mapstructure:"specs_dir" yaml:"specs_dir"`
 	} `mapstructure:"server" yaml:"server"`
 
@@ -187,7 +185,6 @@ func (c *Config) Save() error {
 	v.Set("logging.debug", c.Logging.Debug)
 	v.Set("logging.directory", c.Logging.Directory)
 	v.Set("logging.filename", c.Logging.Filename)
-	v.Set("server.port", c.Server.Port)
 	v.Set("server.specs_dir", c.Server.SpecsDir)
 	v.Set("github.token", c.GitHub.Token)
 	v.Set("specs", c.Specs)
@@ -247,9 +244,4 @@ specs:
 	}
 
 	return nil
-}
-
-// ConvertGitHubURLToRaw is a helper function that delegates to the github package
-func ConvertGitHubURLToRaw(githubURL, token string) (string, error) {
-	return github.ConvertGitHubURLToRaw(githubURL, token)
 }

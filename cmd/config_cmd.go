@@ -62,7 +62,6 @@ var printConfigCmd = &cobra.Command{
 		fmt.Printf("  Format: %s\n", InternalConfig.Logging.Format)
 
 		fmt.Printf("\nServer:\n")
-		fmt.Printf("  Port: %d\n", InternalConfig.Server.Port)
 		fmt.Printf("  Specs Directory: %s\n", InternalConfig.Server.SpecsDir)
 
 		fmt.Printf("\nGitHub:\n")
