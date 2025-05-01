@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/krypticio/mcp-openapi-explorer/internal/config"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -22,6 +23,9 @@ func initErrorf(format string, args ...interface{}) {
 var (
 	// Logger is the global logger instance
 	Logger *zap.SugaredLogger
+
+	// InternalConfig is the global configuration from internal/config
+	InternalConfig *config.Config
 
 	// Flags
 	verboseFlag bool
@@ -47,8 +51,8 @@ register multiple API specifications, and provide context about API interactions
 		// Set log level based on verbose flag or config
 		if verboseFlag {
 			logLevel = zap.DebugLevel
-		} else if Config.Logging.Level != "" {
-			switch strings.ToLower(Config.Logging.Level) {
+		} else if InternalConfig.Logging.Level != "" {
+			switch strings.ToLower(InternalConfig.Logging.Level) {
 			case "debug":
 				logLevel = zap.DebugLevel
 			case "info":
@@ -66,7 +70,7 @@ register multiple API specifications, and provide context about API interactions
 
 		// Create encoder based on format
 		var encoder zapcore.Encoder
-		if strings.ToLower(Config.Logging.Format) == "text" {
+		if strings.ToLower(InternalConfig.Logging.Format) == "text" {
 			encoderConfig := zap.NewDevelopmentEncoderConfig()
 			encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 			encoder = zapcore.NewConsoleEncoder(encoderConfig)
@@ -81,14 +85,14 @@ register multiple API specifications, and provide context about API interactions
 		cores = append(cores, zapcore.NewCore(encoder, stderrSyncer, logLevel))
 
 		// Add file logging if debug=true and directory is specified
-		if Config.Logging.Debug && Config.Logging.Directory != "" {
+		if InternalConfig.Logging.Debug && InternalConfig.Logging.Directory != "" {
 			// Ensure the log directory exists
-			if err := os.MkdirAll(Config.Logging.Directory, 0755); err != nil {
+			if err := os.MkdirAll(InternalConfig.Logging.Directory, 0755); err != nil {
 				initErrorf("Failed to create log directory: %v", err)
 			}
 
 			// Set up file logging
-			logPath := filepath.Join(Config.Logging.Directory, Config.Logging.Filename)
+			logPath := filepath.Join(InternalConfig.Logging.Directory, InternalConfig.Logging.Filename)
 			fileSyncer, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 			if err != nil {
 				initErrorf("Failed to open log file: %v", err)
@@ -100,7 +104,6 @@ register multiple API specifications, and provide context about API interactions
 			fileEncoder := zapcore.NewJSONEncoder(fileEncoderConfig)
 
 			cores = append(cores, zapcore.NewCore(fileEncoder, zapcore.AddSync(fileSyncer), logLevel))
-			// No longer directly writing to stdout
 		}
 
 		// Combine cores and create the logger
@@ -123,16 +126,24 @@ func Execute() {
 func init() {
 	// Set up the config file path
 	cobra.OnInitialize(func() {
-		// Store the config flag value in the global ConfigFile variable
-		ConfigFile = configFlag
+		// Create a bootstrap logger for initialization
+		var bootstrapLogger zapcore.Core
+		bootstrapEncoderConfig := zap.NewDevelopmentEncoderConfig()
+		bootstrapEncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+		bootstrapEncoder := zapcore.NewConsoleEncoder(bootstrapEncoderConfig)
+		bootstrapLogger = zapcore.NewCore(bootstrapEncoder, zapcore.AddSync(os.Stderr), zap.InfoLevel)
 
-		// Initialize config using Viper
-		if err := initConfig(); err != nil {
+		tempLogger := zap.New(bootstrapLogger).Sugar()
+
+		// Initialize config using internal package
+		var err error
+		InternalConfig, err = config.LoadConfig(configFlag, tempLogger, verboseFlag)
+		if err != nil {
 			initErrorf("Error loading configuration: %v", err)
 		}
 
 		// Set the global specsDir variable from config
-		specsDir = Config.Server.SpecsDir
+		specsDir = InternalConfig.Server.SpecsDir
 	})
 
 	// Define persistent flags for all commands
@@ -140,45 +151,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&configFlag, "config", "c", "", "Path to configuration file")
 }
 
-// convertGitHubURLToRaw converts a GitHub URL to a raw.githubusercontent.com URL
-// If token is provided, it uses it for private repositories
-func convertGitHubURLToRaw(githubURL, token string) (string, error) {
-	// Remove any protocol prefix if present
-	githubURL = strings.TrimPrefix(githubURL, "https://")
-	githubURL = strings.TrimPrefix(githubURL, "http://")
-
-	// Ensure it's a GitHub URL
-	if !strings.HasPrefix(githubURL, "github.com") {
-		return "", fmt.Errorf("not a GitHub URL: %s", githubURL)
-	}
-
-	// Handle GitHub path
-	parts := strings.Split(githubURL, "/")
-	if len(parts) < 5 {
-		return "", fmt.Errorf("invalid GitHub URL format: %s", githubURL)
-	}
-
-	// Extract relevant parts
-	owner := parts[1]
-	repo := parts[2]
-
-	// Determine if it's a blob URL or not
-	var branch, path string
-	if parts[3] == "blob" {
-		branch = parts[4]
-		path = strings.Join(parts[5:], "/")
-	} else {
-		branch = parts[3]
-		path = strings.Join(parts[4:], "/")
-	}
-
-	// Construct raw URL
-	rawURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", owner, repo, branch, path)
-
-	// Add token if provided
-	if token != "" {
-		rawURL = fmt.Sprintf("https://%s@raw.githubusercontent.com/%s/%s/%s/%s", token, owner, repo, branch, path)
-	}
-
-	return rawURL, nil
+// ConvertGitHubURLToRaw is a wrapper for the internal config version
+func ConvertGitHubURLToRaw(githubURL, token string) (string, error) {
+	return config.ConvertGitHubURLToRaw(githubURL, token)
 }
