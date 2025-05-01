@@ -9,8 +9,6 @@ logging:
 
 # Server configuration
 server:
-  # Server port
-  port: 8080
   # Directory to store downloaded API specs
   specs_dir: ./specs
 
