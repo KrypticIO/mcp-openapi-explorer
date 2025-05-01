@@ -661,8 +661,3 @@ func (h *MCPHandler) AddSpec(specID string, spec *APISpec) {
 		"spec_id", specID,
 		"title", spec.Spec.Info.Title)
 }
-
-// loadOpenAPISpec is a wrapper for the public LoadOpenAPISpec method
-func (h *MCPHandler) loadOpenAPISpec(ctx context.Context, specURL string) (*openapi3.T, error) {
-	return h.LoadOpenAPISpec(ctx, specURL)
-}
