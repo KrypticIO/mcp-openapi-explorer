@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 
+	"github.com/krypticio/mcp-openapi-explorer/internal/github"
 	"github.com/krypticio/mcp-openapi-explorer/internal/server"
 	"github.com/spf13/cobra"
 )
@@ -31,12 +32,12 @@ func loadSpec(url string) {
 	handler := server.NewHandler(specsDir, Logger, InternalConfig)
 
 	// Process GitHub URL if applicable
-	if server.IsGitHubURL(url) {
+	if github.IsGitHubURL(url) {
 		// Trim any '@' prefix that might be used
-		path := server.TrimGitHubPrefix(url)
+		path := github.TrimGitHubPrefix(url)
 
 		// Convert github.com URL to raw.githubusercontent.com
-		ghPath, err := server.ConvertGitHubURLToRaw(path, InternalConfig.GitHub.Token)
+		ghPath, err := github.ConvertGitHubURLToRaw(path, InternalConfig.GitHub.Token)
 		if err != nil {
 			Logger.Fatalw("Failed to process GitHub URL", "error", err, "url", url)
 		}

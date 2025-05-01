@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/krypticio/mcp-openapi-explorer/internal/github"
 	"github.com/krypticio/mcp-openapi-explorer/internal/server"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
@@ -29,15 +30,15 @@ func RegisterLoadAPISpec(mcpServer *mcpserver.MCPServer, handler *server.MCPHand
 		}
 
 		// Handle GitHub repositories
-		if server.IsGitHubURL(url) {
+		if github.IsGitHubURL(url) {
 			// Trim any '@' prefix that might be used
-			path := server.TrimGitHubPrefix(url)
+			path := github.TrimGitHubPrefix(url)
 
 			// Use GitHub token from config
 			ghToken := config.GetGitHubToken()
 
 			// Convert github.com URL to raw.githubusercontent.com
-			ghPath, err := server.ConvertGitHubURLToRaw(path, ghToken)
+			ghPath, err := github.ConvertGitHubURLToRaw(path, ghToken)
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Failed to process GitHub URL: %v", err)), nil
 			}

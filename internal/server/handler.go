@@ -20,10 +20,10 @@ import (
 // SpecsDir is the directory where specs are stored
 var SpecsDir string
 
-// Logger is the application logger
+// Logger is the global logger
 var Logger LoggerInterface
 
-// Config is the application configuration
+// Config is the global configuration
 var Config ConfigInterface
 
 // LoggerInterface defines the required logging methods
@@ -35,7 +35,7 @@ type LoggerInterface interface {
 	Fatalw(msg string, keysAndValues ...interface{})
 }
 
-// ConfigInterface defines the required configuration methods
+// ConfigInterface defines the required config methods
 type ConfigInterface interface {
 	GetGitHubToken() string
 	GetSpecs() []string
@@ -52,24 +52,23 @@ type APISpec struct {
 	Spec *openapi3.T `json:"spec"`
 }
 
-// MCPHandler handles OpenAPI specs and MCP requests
+// MCPHandler handles OpenAPI specs for the MCP server
 type MCPHandler struct {
 	specs map[string]*APISpec
 }
 
-// MCPRequest represents a request to the MCP server
+// MCPRequest represents an MCP request
 type MCPRequest struct {
 	Query string `json:"query"`
 }
 
-// MCPResponse represents a response from the MCP server
+// MCPResponse represents an MCP response
 type MCPResponse struct {
 	Context string `json:"context"`
 }
 
 // NewHandler creates a new MCPHandler
 func NewHandler(specsDir string, logger LoggerInterface, config ConfigInterface) *MCPHandler {
-	// Set global variables
 	SpecsDir = specsDir
 	Logger = logger
 	Config = config
@@ -78,9 +77,9 @@ func NewHandler(specsDir string, logger LoggerInterface, config ConfigInterface)
 		specs: make(map[string]*APISpec),
 	}
 
-	// Load specs from files
+	// Load specs from disk
 	if err := handler.loadSpecs(); err != nil {
-		Logger.Warnw("Failed to load specs", "error", err)
+		Logger.Warnw("Failed to load specs from disk", "error", err)
 	}
 
 	return handler
@@ -535,37 +534,6 @@ func (h *MCPHandler) DeleteSpec(specID string) error {
 		"title", specTitle)
 
 	return nil
-}
-
-// Utility function for GitHub URL conversion - exported for use by other packages
-func ConvertGitHubURLToRaw(ghURL string, token string) (string, error) {
-	// Handle github.com URLs
-	if !strings.HasPrefix(ghURL, "github.com/") {
-		return "", fmt.Errorf("not a valid GitHub URL: %s", ghURL)
-	}
-
-	// Remove the github.com/ prefix
-	repoPath := strings.TrimPrefix(ghURL, "github.com/")
-
-	// Split into owner/repo/path parts
-	parts := strings.SplitN(repoPath, "/", 3)
-	if len(parts) < 3 {
-		return "", fmt.Errorf("invalid GitHub path format, expected owner/repo/path: %s", ghURL)
-	}
-
-	owner := parts[0]
-	repo := parts[1]
-	path := parts[2]
-
-	// Handle /blob/ and /tree/ URLs
-	path = strings.Replace(path, "blob/", "", 1)
-	path = strings.Replace(path, "tree/", "", 1)
-
-	// Construct the raw URL
-	rawURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s", owner, repo, path)
-
-	Logger.Debugw("Converted GitHub URL", "original", ghURL, "raw", rawURL)
-	return rawURL, nil
 }
 
 // GetSpecs returns a copy of the loaded specs map

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/krypticio/mcp-openapi-explorer/internal/config"
+	"github.com/krypticio/mcp-openapi-explorer/internal/github"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -151,7 +152,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&configFlag, "config", "c", "", "Path to configuration file")
 }
 
-// ConvertGitHubURLToRaw is a wrapper for the internal config version
+// ConvertGitHubURLToRaw is a wrapper for the github package
 func ConvertGitHubURLToRaw(githubURL, token string) (string, error) {
-	return config.ConvertGitHubURLToRaw(githubURL, token)
+	return github.ConvertGitHubURLToRaw(githubURL, token)
 }

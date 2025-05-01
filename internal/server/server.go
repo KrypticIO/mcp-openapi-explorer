@@ -3,8 +3,8 @@ package server
 import (
 	"context"
 	"os"
-	"strings"
 
+	"github.com/krypticio/mcp-openapi-explorer/internal/github"
 	"github.com/mark3labs/mcp-go/server"
 )
 
@@ -36,15 +36,15 @@ func CreateServer(specsDir string, logger LoggerInterface, config ConfigInterfac
 			logger.Infow("Loading spec from configuration", "url", specURL)
 
 			// Handle GitHub repositories
-			if isGitHubURL(specURL) {
+			if github.IsGitHubURL(specURL) {
 				// Trim any '@' prefix that might be used
-				path := trimGitHubPrefix(specURL)
+				path := github.TrimGitHubPrefix(specURL)
 
 				// Use GitHub token from config
 				ghToken := config.GetGitHubToken()
 
 				// Convert github.com URL to raw.githubusercontent.com
-				ghPath, err := ConvertGitHubURLToRaw(path, ghToken)
+				ghPath, err := github.ConvertGitHubURLToRaw(path, ghToken)
 				if err != nil {
 					logger.Warnw("Failed to process GitHub URL", "error", err, "path", path)
 					continue
@@ -136,22 +136,22 @@ func StartServer(specsDir string, logger LoggerInterface, config ConfigInterface
 	return server.Start()
 }
 
-// Helper function to check if a URL is a GitHub URL
+// Helper function to check if a URL is a GitHub URL (deprecated, use github.IsGitHubURL instead)
 func IsGitHubURL(url string) bool {
-	return strings.HasPrefix(url, "github.com") || strings.HasPrefix(url, "@github.com")
+	return github.IsGitHubURL(url)
 }
 
-// Helper function to trim GitHub URL prefix
+// Helper function to trim GitHub URL prefix (deprecated, use github.TrimGitHubPrefix instead)
 func TrimGitHubPrefix(url string) string {
-	return strings.TrimPrefix(url, "@")
+	return github.TrimGitHubPrefix(url)
 }
 
-// isGitHubURL is a private version of IsGitHubURL
+// isGitHubURL is a wrapper for the github package
 func isGitHubURL(url string) bool {
-	return IsGitHubURL(url)
+	return github.IsGitHubURL(url)
 }
 
-// trimGitHubPrefix is a private version of TrimGitHubPrefix
+// trimGitHubPrefix is a wrapper for the github package
 func trimGitHubPrefix(url string) string {
-	return TrimGitHubPrefix(url)
+	return github.TrimGitHubPrefix(url)
 }

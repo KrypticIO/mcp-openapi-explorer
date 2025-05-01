@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"github.com/krypticio/mcp-openapi-explorer/internal/github"
 	"github.com/krypticio/mcp-openapi-explorer/internal/server"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 )
@@ -22,10 +23,10 @@ func RegisterEverything(mcpServer *mcpserver.MCPServer, handler *server.MCPHandl
 
 // isGitHubURL checks if a URL is a GitHub URL
 func isGitHubURL(url string) bool {
-	return server.IsGitHubURL(url)
+	return github.IsGitHubURL(url)
 }
 
 // trimGitHubPrefix trims the prefix from a GitHub URL
 func trimGitHubPrefix(url string) string {
-	return server.TrimGitHubPrefix(url)
+	return github.TrimGitHubPrefix(url)
 }
