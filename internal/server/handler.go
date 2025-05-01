@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,14 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/gorilla/mux"
 	"gopkg.in/yaml.v3"
+)
+
+// Common error types for consistent error handling
+var (
+	ErrNotFound      = errors.New("not found")
+	ErrInvalidURL    = errors.New("invalid URL")
+	ErrInvalidSpec   = errors.New("invalid OpenAPI spec")
+	ErrFileOperation = errors.New("file operation failed")
 )
 
 // SpecsDir is the directory where specs are stored
@@ -79,7 +88,13 @@ func NewHandler(specsDir string, logger LoggerInterface, config ConfigInterface)
 
 	// Load specs from disk
 	if err := handler.loadSpecs(); err != nil {
-		Logger.Warnw("Failed to load specs from disk", "error", err)
+		Logger.Warnw("Failed to load specs from disk",
+			"error", err,
+			"directory", specsDir)
+	} else {
+		Logger.Infow("Successfully loaded specs from disk",
+			"count", len(handler.specs),
+			"directory", specsDir)
 	}
 
 	return handler
@@ -95,17 +110,23 @@ func (h *MCPHandler) LoadOpenAPISpec(ctx context.Context, specURL string) (*open
 	// Handle GitHub URLs
 	if strings.Contains(specURL, "github.com") && !strings.Contains(specURL, "raw.githubusercontent.com") {
 		// Convert github.com URL to raw.githubusercontent.com
+		originalURL := specURL
 		specURL = strings.Replace(specURL, "github.com", "raw.githubusercontent.com", 1)
 		specURL = strings.Replace(specURL, "/blob/", "/", 1)
-		Logger.Debugw("Converted GitHub URL", "url", specURL)
+		Logger.Debugw("Converted GitHub URL",
+			"original_url", originalURL,
+			"converted_url", specURL)
 	}
 
 	parsedURL, err := url.Parse(specURL)
 	if err != nil {
-		return nil, fmt.Errorf("invalid URL: %w", err)
+		return nil, fmt.Errorf("%w: %s - %v", ErrInvalidURL, specURL, err)
 	}
 
-	Logger.Debugw("Parsed URL", "scheme", parsedURL.Scheme)
+	Logger.Debugw("Parsed URL",
+		"scheme", parsedURL.Scheme,
+		"host", parsedURL.Host,
+		"path", parsedURL.Path)
 
 	var data []byte
 
@@ -116,10 +137,15 @@ func (h *MCPHandler) LoadOpenAPISpec(ctx context.Context, specURL string) (*open
 			path = strings.TrimPrefix(specURL, "file://")
 		}
 		Logger.Debugw("Loading from local file", "path", path)
+
 		data, err = os.ReadFile(path)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read local file: %w", err)
+			return nil, fmt.Errorf("%w: failed to read file %s - %v", ErrFileOperation, path, err)
 		}
+
+		Logger.Debugw("Successfully read local file",
+			"path", path,
+			"bytes", len(data))
 	} else {
 		// Handle HTTP/HTTPS URLs
 		Logger.Debugw("Fetching spec from URL", "url", specURL)
@@ -127,34 +153,42 @@ func (h *MCPHandler) LoadOpenAPISpec(ctx context.Context, specURL string) (*open
 		client := &http.Client{}
 		req, err := http.NewRequestWithContext(ctx, "GET", specURL, nil)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create request: %w", err)
+			return nil, fmt.Errorf("failed to create request for %s: %w", specURL, err)
 		}
 
 		// Add authentication header if this is a GitHub URL and a token is provided
-		if strings.Contains(specURL, "githubusercontent.com") && Config.GetGitHubToken() != "" {
-			req.Header.Add("Authorization", fmt.Sprintf("token %s", Config.GetGitHubToken()))
+		token := Config.GetGitHubToken()
+		if strings.Contains(specURL, "githubusercontent.com") && token != "" {
+			req.Header.Add("Authorization", fmt.Sprintf("token %s", token))
+			Logger.Debugw("Added GitHub token to request",
+				"url", specURL,
+				"token_available", true)
 		}
 
 		resp, err := client.Do(req)
 		if err != nil {
-			return nil, fmt.Errorf("failed to fetch spec: %w", err)
+			return nil, fmt.Errorf("failed to fetch from %s: %w", specURL, err)
 		}
 		defer func(Body io.ReadCloser) {
-			err := Body.Close()
-			if err != nil {
-				Logger.Errorw("Failed to close response body", "error", err)
+			if closeErr := Body.Close(); closeErr != nil {
+				Logger.Errorw("Failed to close response body",
+					"error", closeErr,
+					"url", specURL)
 			}
 		}(resp.Body)
 
 		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("failed to fetch spec: HTTP %d", resp.StatusCode)
+			return nil, fmt.Errorf("failed to fetch spec from %s: HTTP %d", specURL, resp.StatusCode)
 		}
 
 		data, err = io.ReadAll(resp.Body)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read response body: %w", err)
+			return nil, fmt.Errorf("failed to read response body from %s: %w", specURL, err)
 		}
-		Logger.Debugw("Received data", "bytes", len(data))
+		Logger.Debugw("Received data",
+			"url", specURL,
+			"bytes", len(data),
+			"status_code", resp.StatusCode)
 	}
 
 	// Determine if this is YAML or JSON
@@ -162,31 +196,38 @@ func (h *MCPHandler) LoadOpenAPISpec(ctx context.Context, specURL string) (*open
 
 	// Try to detect if it's YAML or JSON
 	if isJSON(data) {
-		Logger.Debugw("Parsing as JSON")
+		Logger.Debugw("Parsing as JSON", "url", specURL)
 		spec, err = loader.LoadFromData(data)
+		if err != nil {
+			return nil, fmt.Errorf("%w: failed to parse JSON from %s - %v", ErrInvalidSpec, specURL, err)
+		}
 	} else {
-		Logger.Debugw("Parsing as YAML")
+		Logger.Debugw("Parsing as YAML", "url", specURL)
 		// Convert YAML to JSON first
 		var jsonData map[string]interface{}
 		if err := yaml.Unmarshal(data, &jsonData); err != nil {
-			return nil, fmt.Errorf("failed to parse YAML: %w", err)
+			return nil, fmt.Errorf("%w: failed to parse YAML from %s - %v", ErrInvalidSpec, specURL, err)
 		}
 
 		// Convert the map to JSON
 		jsonBytes, err := json.Marshal(jsonData)
 		if err != nil {
-			return nil, fmt.Errorf("failed to convert YAML to JSON: %w", err)
+			return nil, fmt.Errorf("%w: failed to convert YAML to JSON from %s - %v", ErrInvalidSpec, specURL, err)
 		}
 
 		// Now load from the JSON data
-		spec, _ = loader.LoadFromData(jsonBytes)
+		spec, err = loader.LoadFromData(jsonBytes)
+		if err != nil {
+			return nil, fmt.Errorf("%w: failed to parse converted JSON from %s - %v", ErrInvalidSpec, specURL, err)
+		}
 	}
 
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse OpenAPI spec: %w", err)
-	}
+	Logger.Infow("Successfully loaded OpenAPI spec",
+		"url", specURL,
+		"title", spec.Info.Title,
+		"version", spec.Info.Version,
+		"endpoints", len(spec.Paths.Map()))
 
-	Logger.Debugw("Successfully loaded OpenAPI spec", "title", spec.Info.Title, "version", spec.Info.Version)
 	return spec, nil
 }
 
@@ -215,6 +256,7 @@ func (h *MCPHandler) HandleMCPRequest(ctx context.Context, req *MCPRequest) (*MC
 
 	// If no specs are loaded, return a helpful message
 	if len(h.specs) == 0 {
+		Logger.Infow("No API specs loaded for MCP request")
 		return &MCPResponse{
 			Context: "No API specifications have been loaded. Please load an OpenAPI spec first.",
 		}, nil
@@ -320,6 +362,10 @@ func (h *MCPHandler) HandleMCPRequest(ctx context.Context, req *MCPRequest) (*MC
 		}
 	}
 
+	Logger.Infow("Returning MCP response",
+		"specs_count", len(h.specs),
+		"response_length", apiContext.Len())
+
 	return &MCPResponse{
 		Context: apiContext.String(),
 	}, nil
@@ -332,7 +378,9 @@ func (h *MCPHandler) RegisterSpec(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		Logger.Errorw("Failed to decode request body", "error", err)
+		Logger.Errorw("Failed to decode request body",
+			"error", err,
+			"remote_addr", r.RemoteAddr)
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -340,7 +388,10 @@ func (h *MCPHandler) RegisterSpec(w http.ResponseWriter, r *http.Request) {
 	Logger.Infow("Registering new spec", "url", req.URL)
 	spec, err := h.LoadOpenAPISpec(r.Context(), req.URL)
 	if err != nil {
-		Logger.Errorw("Failed to load OpenAPI spec", "error", err, "url", req.URL)
+		Logger.Errorw("Failed to load OpenAPI spec",
+			"error", err,
+			"url", req.URL,
+			"remote_addr", r.RemoteAddr)
 		http.Error(w, fmt.Sprintf("Failed to load spec: %v", err), http.StatusBadRequest)
 		return
 	}
@@ -352,12 +403,19 @@ func (h *MCPHandler) RegisterSpec(w http.ResponseWriter, r *http.Request) {
 		Spec: spec,
 	}
 
-	Logger.Infow("Successfully registered spec", "id", specID, "title", spec.Info.Title)
+	Logger.Infow("Successfully registered spec",
+		"id", specID,
+		"title", spec.Info.Title,
+		"url", req.URL,
+		"remote_addr", r.RemoteAddr)
+
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(map[string]string{
 		"id": specID,
 	}); err != nil {
-		Logger.Errorw("Failed to encode response", "error", err)
+		Logger.Errorw("Failed to encode response",
+			"error", err,
+			"remote_addr", r.RemoteAddr)
 	}
 }
 
@@ -366,19 +424,29 @@ func (h *MCPHandler) GetSpec(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	specID := vars["id"]
 
-	Logger.Debugw("Getting spec", "id", specID)
+	Logger.Debugw("Getting spec", "id", specID, "remote_addr", r.RemoteAddr)
 	spec, exists := h.specs[specID]
 	if !exists {
-		Logger.Warnw("Spec not found", "id", specID)
+		Logger.Warnw("Spec not found",
+			"id", specID,
+			"remote_addr", r.RemoteAddr)
 		http.Error(w, "Spec not found", http.StatusNotFound)
 		return
 	}
 
 	if err := json.NewEncoder(w).Encode(spec); err != nil {
-		Logger.Errorw("Failed to encode api specs", "error", err)
+		Logger.Errorw("Failed to encode api specs",
+			"error", err,
+			"id", specID,
+			"remote_addr", r.RemoteAddr)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
+
+	Logger.Infow("Successfully served spec",
+		"id", specID,
+		"title", spec.Spec.Info.Title,
+		"remote_addr", r.RemoteAddr)
 }
 
 // ListEndpoints lists all endpoints in a registered OpenAPI specification via HTTP
@@ -386,17 +454,23 @@ func (h *MCPHandler) ListEndpoints(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	specID := vars["id"]
 
-	Logger.Debugw("Listing endpoints for spec", "id", specID)
+	Logger.Debugw("Listing endpoints for spec", "id", specID, "remote_addr", r.RemoteAddr)
 	spec, exists := h.specs[specID]
 	if !exists {
-		Logger.Warnw("Spec not found", "id", specID)
+		Logger.Warnw("Spec not found",
+			"id", specID,
+			"remote_addr", r.RemoteAddr)
 		http.Error(w, "Spec not found", http.StatusNotFound)
 		return
 	}
 
 	endpoints := make([]map[string]interface{}, 0)
 	if spec.Spec.Paths != nil {
-		Logger.Debugw("Found paths in spec", "count", len(spec.Spec.Paths.Map()))
+		pathsCount := len(spec.Spec.Paths.Map())
+		Logger.Debugw("Found paths in spec",
+			"count", pathsCount,
+			"id", specID)
+
 		for path, pathItem := range spec.Spec.Paths.Map() {
 			for method, operation := range pathItem.Operations() {
 				endpoint := map[string]interface{}{
@@ -409,16 +483,26 @@ func (h *MCPHandler) ListEndpoints(w http.ResponseWriter, r *http.Request) {
 					"responses":   operation.Responses,
 				}
 				endpoints = append(endpoints, endpoint)
-				Logger.Debugw("Added endpoint", "method", method, "path", path)
+				Logger.Debugw("Added endpoint",
+					"method", method,
+					"path", path,
+					"id", specID)
 			}
 		}
 	} else {
-		Logger.Warnw("No paths found in spec")
+		Logger.Warnw("No paths found in spec", "id", specID)
 	}
 
-	Logger.Infow("Returning endpoints", "count", len(endpoints))
+	Logger.Infow("Returning endpoints",
+		"count", len(endpoints),
+		"id", specID,
+		"remote_addr", r.RemoteAddr)
+
 	if err := json.NewEncoder(w).Encode(endpoints); err != nil {
-		Logger.Errorw("Failed to encode endpoints", "error", err)
+		Logger.Errorw("Failed to encode endpoints",
+			"error", err,
+			"id", specID,
+			"remote_addr", r.RemoteAddr)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -428,22 +512,25 @@ func (h *MCPHandler) ListEndpoints(w http.ResponseWriter, r *http.Request) {
 func (h *MCPHandler) SaveSpec(specID string, spec *APISpec) error {
 	// Create specs directory if it doesn't exist
 	if err := os.MkdirAll(SpecsDir, 0755); err != nil {
-		return fmt.Errorf("failed to create specs directory: %w", err)
+		return fmt.Errorf("%w: failed to create specs directory %s - %v", ErrFileOperation, SpecsDir, err)
 	}
 
 	// Marshal the API spec to JSON
 	specData, err := json.Marshal(spec)
 	if err != nil {
-		return fmt.Errorf("failed to marshal spec: %w", err)
+		return fmt.Errorf("failed to marshal spec %s: %w", specID, err)
 	}
 
 	// Save the spec to a file
 	specPath := filepath.Join(SpecsDir, specID+".json")
 	if err := os.WriteFile(specPath, specData, 0644); err != nil {
-		return fmt.Errorf("failed to write spec file: %w", err)
+		return fmt.Errorf("%w: failed to write spec file %s - %v", ErrFileOperation, specPath, err)
 	}
 
-	Logger.Debugw("Saved spec", "id", specID, "path", specPath)
+	Logger.Debugw("Saved spec",
+		"id", specID,
+		"path", specPath,
+		"bytes", len(specData))
 	return nil
 }
 
@@ -451,16 +538,24 @@ func (h *MCPHandler) SaveSpec(specID string, spec *APISpec) error {
 func (h *MCPHandler) loadSpecs() error {
 	// Create specs directory if it doesn't exist
 	if err := os.MkdirAll(SpecsDir, 0755); err != nil {
-		return fmt.Errorf("failed to create specs directory: %w", err)
+		return fmt.Errorf("%w: failed to create specs directory %s - %v", ErrFileOperation, SpecsDir, err)
 	}
 
 	// Get all JSON files in the specs directory
 	files, err := filepath.Glob(filepath.Join(SpecsDir, "*.json"))
 	if err != nil {
-		return fmt.Errorf("failed to list spec files: %w", err)
+		return fmt.Errorf("%w: failed to list spec files in %s - %v", ErrFileOperation, SpecsDir, err)
+	}
+
+	if len(files) == 0 {
+		Logger.Infow("No spec files found", "directory", SpecsDir)
+		return nil
 	}
 
 	// Load each spec file
+	loadedCount := 0
+	failedCount := 0
+
 	for _, file := range files {
 		specID := filepath.Base(file)
 		specID = specID[:len(specID)-5] // Remove .json extension
@@ -468,23 +563,41 @@ func (h *MCPHandler) loadSpecs() error {
 		// Read the spec file
 		specData, err := os.ReadFile(file)
 		if err != nil {
-			Logger.Warnw("Failed to read spec file", "file", file, "error", err)
+			Logger.Warnw("Failed to read spec file",
+				"file", file,
+				"error", err,
+				"spec_id", specID)
+			failedCount++
 			continue
 		}
 
 		// Unmarshal the spec
 		var spec APISpec
 		if err := json.Unmarshal(specData, &spec); err != nil {
-			Logger.Warnw("Failed to unmarshal spec", "file", file, "error", err)
+			Logger.Warnw("Failed to unmarshal spec",
+				"file", file,
+				"error", err,
+				"spec_id", specID)
+			failedCount++
 			continue
 		}
 
 		// Add the spec to the handler
 		h.specs[specID] = &spec
-		Logger.Debugw("Loaded spec", "id", specID, "file", file)
+		Logger.Debugw("Loaded spec",
+			"id", specID,
+			"file", file,
+			"title", spec.Spec.Info.Title,
+			"size", len(specData))
+		loadedCount++
 	}
 
-	Logger.Infow("Loaded specs", "count", len(h.specs), "dir", SpecsDir)
+	Logger.Infow("Specs loading completed",
+		"loaded", loadedCount,
+		"failed", failedCount,
+		"total", len(files),
+		"directory", SpecsDir)
+
 	return nil
 }
 
@@ -498,7 +611,7 @@ func (h *MCPHandler) DeleteSpec(specID string) error {
 	// Check if the spec exists
 	_, exists := h.specs[specID]
 	if !exists {
-		return fmt.Errorf("spec not found: %s", specID)
+		return fmt.Errorf("%w: spec %s not found", ErrNotFound, specID)
 	}
 
 	// Get a clean filename - avoid any potential path traversal issues
@@ -517,12 +630,12 @@ func (h *MCPHandler) DeleteSpec(specID string) error {
 		// Log the error but continue - we'll still remove from memory
 		Logger.Warnw("Failed to delete spec file",
 			"error", err,
-			"specID", specID,
+			"spec_id", specID,
 			"title", specTitle,
 			"path", specPath)
 	} else {
 		Logger.Debugw("Deleted spec file",
-			"specID", specID,
+			"spec_id", specID,
 			"title", specTitle,
 			"path", specPath)
 	}
@@ -530,7 +643,7 @@ func (h *MCPHandler) DeleteSpec(specID string) error {
 	// Remove from memory
 	delete(h.specs, specID)
 	Logger.Infow("Removed spec from memory",
-		"specID", specID,
+		"spec_id", specID,
 		"title", specTitle)
 
 	return nil
@@ -544,6 +657,9 @@ func (h *MCPHandler) GetSpecs() map[string]*APISpec {
 // AddSpec adds a spec to the handler
 func (h *MCPHandler) AddSpec(specID string, spec *APISpec) {
 	h.specs[specID] = spec
+	Logger.Infow("Added spec to handler",
+		"spec_id", specID,
+		"title", spec.Spec.Info.Title)
 }
 
 // loadOpenAPISpec is a wrapper for the public LoadOpenAPISpec method
